@@ -1,0 +1,26 @@
+# Local copyrighted benchmark clips: keep available for testing, never commit.
+/fixtures/lair_320_23976_30s_spec.mpg
+/fixtures/maddog_320_2997_30s_spec.mpg
+/fixtures/lair_640_23976_30s_cgop.mpg
+/fixtures/lair_640_2997_30s_cgop.mpg
+/fixtures/maddog_640_2997_30s_cgop.mpg
+/fixtures/lair_320_23976_30s_stereo_spec.mpg
+/fixtures/lair_320_23976_30s.m1v
+/build/
+/dc-libavmpeg.elf
+/dc-libavmpeg-probe.elf
+/dc-libavmpeg-audio.elf
+/dc-libavmpeg-av.elf
+/src/*.o
+/build_*/
+*.elf
+*.cdi
+*.o
+
+# Local agent notes and hardware investigation records are kept off the public repo.
+/AGENTS.md
+/docs/NEXT_TASK.md
+/docs/RESULTS.md
+/docs/STATUS.md
+/docs/KOS_WORKFLOW.md
+/fixtures/README.md

@@ -1,0 +1,64 @@
+# dc-libavmpeg
+
+A standalone KallistiOS project exploring MPEG-1 playback on the Sega Dreamcast.
+It uses a vendored FFmpeg 0.5 source subset for MPEG-1 video decoding, MPEG-PS
+demuxing, and MP2 audio decoding. Application and PVR code lives in `src/`;
+FFmpeg-derived code and its notices remain under `vendor/ffmpeg/`.
+
+The project builds separate video, audio/video, audio, and decoder-probe ELFs.
+The default IDCT is the bit-exact integer implementation. Hardware optimization
+is ongoing; build success alone does not imply a playback performance target.
+
+## Requirements
+
+- KallistiOS and its SH-4 toolchain configured at `/opt/toolchains/dc/kos`
+- `kos-cc`, `sh-elf-*`, and `kos-tool` from that KOS environment
+- A Dreamcast running dcload-ip for hardware runs
+- A local MPEG fixture for playback; copyrighted test clips are not included
+
+Source KOS's environment in the same shell as each build or hardware command:
+
+```sh
+source /opt/toolchains/dc/kos/environ.sh
+```
+
+## Build
+
+```sh
+make                 # video-only decoder: dc-libavmpeg.elf
+make av              # synchronized video/audio player: dc-libavmpeg-av.elf
+make audio            # audio diagnostic: dc-libavmpeg-audio.elf
+make probe            # decoder probe: dc-libavmpeg-probe.elf
+```
+
+To load an ELF over dcload-ip, for example:
+
+```sh
+make run-av DC_IP=<dreamcast-ip>
+```
+
+`make cdi` optionally packages the default local fixture with the video-only
+ELF. Build and package outputs are ignored by Git.
+
+## Playback fixture
+
+Fixtures are deliberately excluded from this repository. On Dreamcast, `/pc`
+is KOS's BBA-backed virtual filesystem. The A/V player looks for
+`/pc/config.ini` first and `/cd/config.ini` second. It resolves the configured
+fixture from `/pc/fixtures/` or the disc root. Make those files available
+through the dcload/BBA file service, or override the path macros at build time.
+The repository's `.gitignore` excludes local benchmark clips in `fixtures/`.
+
+## Project layout
+
+- `src/` — player, decoder glue, PVR presentation, and KOS entry points
+- `vendor/ffmpeg/` — FFmpeg 0.5 source and upstream license notices
+- `tools/` — layout and cache-probe utilities used during SH-4 investigation
+- `docs/LICENSE_NOTES.md` — FFmpeg provenance and local modifications
+
+## Licensing
+
+The vendored FFmpeg files retain their upstream headers and license files.
+Project code must keep FFmpeg-derived changes under `vendor/ffmpeg/` and record
+them in `docs/LICENSE_NOTES.md`. See those notices for component-specific
+licensing details.
