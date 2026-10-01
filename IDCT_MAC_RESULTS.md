@@ -96,5 +96,4 @@ still lower. Slow layouts read ~27.9K in the region, so both are far from that b
 - 720/0 on every run: v2 is 10/12 (two 719/1 at p0); ref is 0/12.
 - Only the mono Lair fixture; stereo and 640x480 fixtures not run.
 - alias_check.py is island-specific (island sections, trampoline, private stack) and does
-  not apply to the asm kernels. layout_guard.py: see the measured gate below.
-- Not committed (the working checkout had no git remote).
+  not apply to the asm kernels. layout_guard.py passes (see above).
