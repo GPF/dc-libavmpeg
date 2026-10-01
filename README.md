@@ -57,7 +57,10 @@ must fit in the free heap (about 13 MB with the decoder allocated): the 13.8 MB
 the reads happen during playback: on the 320x240 mono clip that costs about
 2.4 ms/frame of decode time and 9 dropped frames (128 KB buffer: 2.2 ms and
 39 drops) against 0 drops preloaded, so keep preload for benchmarking and use
-streaming for clips that do not fit or for disc playback.
+streaming for clips that do not fit or for disc playback. With streaming the full
+13.8 MB 640x480 clip opens and decodes all 720 frames with no errors (about 79 ms/frame
+with the C IDCT and a 4-slot queue, roughly twice the 41.7 ms frame period, so it
+cannot play in real time at that size).
 
 ## Project layout
 
