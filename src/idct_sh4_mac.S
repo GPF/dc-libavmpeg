@@ -15,7 +15,8 @@
 ! results in it; the decoder clears blocks before reuse).
 !
 ! Frame-less: no stack. r8-r14 live in fr4-fr10, r4/r5 in fr11/fr3 during the
-! row stage. Clobbers r0-r7, MACH/MACL, FPUL and sets SR.S=0. Uses one global
+! row stage (fr0 holds the column-stage address); all are caller-saved FP
+! registers. Clobbers r0-r7, MACH/MACL, FPUL, fr0, fr3-fr11 and sets SR.S=0. Uses one global
 ! 128-byte scratch buffer: not reentrant, one IDCT at a time.
 !
 ! void ff_simple_idct_{put,add}_mac(uint8_t *dest, int line_size, short *block)
@@ -32,11 +33,8 @@
 #ifndef MAC_TAB_SHIFT
 #define MAC_TAB_SHIFT 0
 #endif
-#ifndef MAC_PREF
-#define MAC_PREF 0
-#endif
-#ifndef MAC_PREF_NOP
-#define MAC_PREF_NOP 0
+#ifndef MAC_TEXT_PAD
+#define MAC_TEXT_PAD 0
 #endif
 #ifndef MAC_TMP_SET
 #define MAC_TMP_SET -1
@@ -229,58 +227,34 @@ SYM(idct_mac_tmp):
 	.endif
 	.endm
 
-	! Operand-cache prefetch at entry (experiment). MAC_PREF=1: the four lines of the
-	! coefficient block; 2: also the four lines of the constant table; 3: also the
-	! eight destination rows. MAC_PREF_NOP=1 swaps every pref for a nop, giving a
-	! control with the same code size and layout.
-	.macro PF reg
-#if MAC_PREF_NOP
-	nop
-#else
-	pref @\reg
-#endif
-	.endm
+	! put and add share one row stage and one exit to halve the code footprint
+	! (the 8 KB instruction cache is the scarce resource, see IDCT_MAC_RESULTS.md).
+	! The entry points only load the address of their own column stage into r0;
+	! the shared stash code parks it in fr0 and the row stage jumps there.
 
-	.macro PREFETCH name
-#if MAC_PREF >= 1
-	mov r6,r0
-	PF r0
-	add #32,r0
-	PF r0
-	add #32,r0
-	PF r0
-	add #32,r0
-	PF r0
-#endif
-#if MAC_PREF >= 2
-	mov.l 3f,r1
-	bra 2f
-	nop
+	.macro ENTRY name, cont
 	.align 2
-3:	.long SYM(idct_mac_tab)
-2:	mov r1,r0
-	PF r0
-	add #32,r0
-	PF r0
-	add #32,r0
-	PF r0
-	add #32,r0
-	PF r0
-#endif
-#if MAC_PREF >= 3
-	mov r4,r0
-	.rept 8
-	PF r0
-	add r5,r0
-	.endr
-#endif
-	.endm
-
-	.macro IDCT name, isadd
-	.align 5
 	.global SYM(\name)
 SYM(\name):
-	PREFETCH \name
+	mov.l 1f,r0
+	bra .Lrows
+	nop
+	.align 2
+1:	.long .L\cont
+	.endm
+
+#if MAC_TEXT_PAD
+	! placement experiment: moves the kernel by whole cache lines
+	.space MAC_TEXT_PAD
+#endif
+	.align 5
+	ENTRY ff_simple_idct_put_mac, colput
+	ENTRY ff_simple_idct_add_mac, coladd
+
+	.align 5
+.Lrows:
+	lds r0,fpul
+	fsts fpul,fr0
 	clrs
 	lds r8,fpul
 	fsts fpul,fr4
@@ -305,9 +279,9 @@ SYM(\name):
 	mov #4,r4
 	shll8 r4
 	mov #-11,r1
-	mov.l .L\name\()_ts,r14
+	mov.l .Lrow_ts,r14
 	mov #8,r7
-.L\name\()_row:
+.Lrow:
 	! DC-only row: every output is (x0 << 3) & 0xffff
 	mov.l @r6,r13
 	shlr16 r13
@@ -318,7 +292,7 @@ SYM(\name):
 	mov.l @(12,r6),r0
 	or r0,r13
 	tst r13,r13
-	bf .L\name\()_gen
+	bf .Lrow_gen
 	mov.w @r6,r13
 	shll2 r13
 	shll r13
@@ -331,10 +305,10 @@ SYM(\name):
 	TSTORE 5
 	TSTORE 6
 	TSTORE 7
-	bra .L\name\()_rownext
+	bra .Lrow_next
 	nop
-.L\name\()_gen:
-	mov.l .L\name\()_tab,r3
+.Lrow_gen:
+	mov.l .Lrow_tab,r3
 	mov r6,r5
 	add #8,r5
 	mov r6,r2
@@ -350,38 +324,42 @@ SYM(\name):
 	ROWLOW r10, 5
 	ROWLOW r9, 6
 	ROWLOW r8, 7
-.L\name\()_rownext:
+.Lrow_next:
 	add #2,r14
 	add #32,r6
 	dt r7
-	bt .L\name\()_rowdone
+	bt .Lrow_done
 	mov r7,r0
 	cmp/eq #4,r0
-	bf .L\name\()_rowagain
+	bf .Lrow_again
 	add #-112,r6
-.L\name\()_rowagain:
-	bra .L\name\()_row
+.Lrow_again:
+	bra .Lrow
 	nop
-.L\name\()_rowdone:
-	bra .L\name\()_colstart
-	nop
-	.align 2
-.L\name\()_ts:  .long SYM(idct_mac_tmp)
-.L\name\()_tab: .long SYM(idct_mac_tab)
-.L\name\()_colstart:
+.Lrow_done:
 	flds fr11,fpul
 	sts fpul,r4
 	flds fr3,fpul
 	sts fpul,r5
-	mov.l .L\name\()_cts,r6
-	mov.l .L\name\()_ccm,r14
-	mov #-20,r1
-	mov #8,r7
+	flds fr0,fpul
+	sts fpul,r0
+	jmp @r0
+	nop
+	.align 2
+.Lrow_ts:  .long SYM(idct_mac_tmp)
+.Lrow_tab: .long SYM(idct_mac_tab)
 
 	! ---- column stage: scratch row j is column j, in split layout ----
+	.macro COLS name, isadd
+	.align 5
+.L\name:
+	mov.l .L\name\()_ts,r6
+	mov.l .L\name\()_cm,r14
+	mov #-20,r1
+	mov #8,r7
 .L\name\()_col:
-	mov.l .L\name\()_ctab,r3
-	mov.l .L\name\()_crnd,r12
+	mov.l .L\name\()_tab,r3
+	mov.l .L\name\()_rnd,r12
 	mov r6,r2
 	CA r8, 0
 	CA r9, 0
@@ -404,18 +382,23 @@ SYM(\name):
 	add #1,r4
 	add #16,r6
 	dt r7
-	bt .L\name\()_coldone
+	bt .L\name\()_done
 	bra .L\name\()_col
 	nop
-.L\name\()_coldone:
-	bra .L\name\()_end
+.L\name\()_done:
+	bra .Lexit
 	nop
 	.align 2
-.L\name\()_cts:  .long SYM(idct_mac_tmp)
-.L\name\()_ctab: .long SYM(idct_mac_tab)
-.L\name\()_ccm:  .long SYM(ff_cropTbl) + 1024
-.L\name\()_crnd: .long 524256
-.L\name\()_end:
+.L\name\()_ts:  .long SYM(idct_mac_tmp)
+.L\name\()_tab: .long SYM(idct_mac_tab)
+.L\name\()_cm:  .long SYM(ff_cropTbl) + 1024
+.L\name\()_rnd: .long 524256
+	.endm
+
+	COLS colput, 0
+	COLS coladd, 1
+
+.Lexit:
 	flds fr4,fpul
 	sts fpul,r8
 	flds fr5,fpul
@@ -432,7 +415,3 @@ SYM(\name):
 	sts fpul,r14
 	rts
 	nop
-	.endm
-
-	IDCT ff_simple_idct_put_mac, 0
-	IDCT ff_simple_idct_add_mac, 1
