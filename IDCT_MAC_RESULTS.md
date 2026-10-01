@@ -111,6 +111,16 @@ each clip with `VQ_SLOTS=4` builds; both sides drop 1-3 frames there (decode is 
 than real time at that size). Streaming input is being worked on separately
 (branch `stream-source`).
 
+## Resolution target
+640x480 at 23.976 fps cannot play in real time with this decoder: decode alone is about
+76 ms/frame (the C IDCT; v2 saves 2-3% of that) against a 41.7 ms frame period, and it
+scales with macroblock count (about 66 us/macroblock for both the 320x240 and 640x480
+clips). Decision: stay at 320x240 (the PVR scales it to the 640x480 display for free).
+Rough starting point for finding the real ceiling later (an estimate from the logs, not a
+measurement): about 66 us decode + about 12 us copy/present per macroblock, plus about 9
+ms/frame of audio and demux, gives roughly 400 macroblocks (352x288 is 396) with no
+headroom and about 330 (352x240) with some. To be measured with clips at those sizes.
+
 ## Open
 - 720/0 on every run: v2 is 10/12 (two 719/1 at p0); ref is 0/12.
 - alias_check.py is island-specific (island sections, trampoline, private stack) and does
