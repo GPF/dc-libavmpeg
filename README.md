@@ -49,6 +49,16 @@ fixture from `/pc/fixtures/` or the disc root. Make those files available
 through the dcload/BBA file service, or override the path macros at build time.
 The repository's `.gitignore` excludes local benchmark clips in `fixtures/`.
 
+By default the A/V player loads the whole clip into RAM before decoding, so a clip
+must fit in the free heap (about 13 MB with the decoder allocated): the 13.8 MB
+640x480 fixtures fail with `Out of memory` while probing. Building with
+`MPEG_EXTRA_CFLAGS=-DAV_STREAM=1` reads the clip through a 16 KB buffer
+(`-DAV_STREAM_BUF=<bytes>`) instead. Frames are identical, but over dcload-ip
+the reads happen during playback: on the 320x240 mono clip that costs about
+2.4 ms/frame of decode time and 9 dropped frames (128 KB buffer: 2.2 ms and
+39 drops) against 0 drops preloaded, so keep preload for benchmarking and use
+streaming for clips that do not fit or for disc playback.
+
 ## Project layout
 
 - `src/` — player, decoder glue, PVR presentation, and KOS entry points

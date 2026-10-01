@@ -8,7 +8,7 @@
 #include "libavformat/avformat.h"
 
 /* Build with -DAV_STREAM=1 to read the file through a small buffer (AV_STREAM_BUF
- * bytes, default 128 KB) instead of loading all of it into RAM first. */
+ * bytes, default 16 KB) instead of loading all of it into RAM first. */
 #ifndef AV_STREAM
 #define AV_STREAM 0
 #endif

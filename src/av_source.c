@@ -8,7 +8,7 @@
 
 #if AV_STREAM
 #ifndef AV_STREAM_BUF
-#define AV_STREAM_BUF (128 * 1024)
+#define AV_STREAM_BUF (16 * 1024)
 #endif
 
 static int stream_read(void *opaque, uint8_t *buf, int size) {
