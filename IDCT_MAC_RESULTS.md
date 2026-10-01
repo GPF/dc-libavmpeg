@@ -79,9 +79,22 @@ and the cost of the extra branches (bra + jmp @r0 per call; SH-4 has no indirect
 prediction) is not repaid. The unshared kernel at +0 is also the best layout measured.
 Kept as a branch for reference only.
 
+## Layout guard (event 04, operand-cache read misses)
+tools/probe2.py with PROBE_IDCT_SUFFIX=_mac wraps the _mac kernels; layout_guard.py on a
+console run (720 decodes, mono Lair fixture), limit 6000 IDCT-region misses/frame:
+
+| build | IDCT-region read misses/frame | whole decode/frame | result |
+|---|---|---|---|
+| C reference | 4100 | 27242 | PASS (fast band) |
+| v2 (MAC.W) | 3561 | 29089 | PASS (fast band) |
+
+v2 misses less inside the IDCT region but ~1.8K more per frame overall: the kernel's data
+(scratch buffer, constant table) displaces other lines outside the region. Net time is
+still lower. Slow layouts read ~27.9K in the region, so both are far from that band.
+
 ## Open
 - 720/0 on every run: v2 is 10/12 (two 719/1 at p0); ref is 0/12.
 - Only the mono Lair fixture; stereo and 640x480 fixtures not run.
-- layout_guard.py / alias_check.py not run on v2 (scratch + table placement unverified
-  against ff_cropTbl and the block buffer).
+- alias_check.py is island-specific (island sections, trampoline, private stack) and does
+  not apply to the asm kernels. layout_guard.py: see the measured gate below.
 - Not committed (the working checkout had no git remote).
