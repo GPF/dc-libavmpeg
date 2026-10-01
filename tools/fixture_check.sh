@@ -24,10 +24,15 @@ mkdir -p fixture_logs
 cp config.ini fixture_logs/config.ini.orig
 trap 'cp fixture_logs/config.ini.orig config.ini' EXIT
 
-run() {   # elf log
-  kos-tool -t "$IP" -x "$1" -m . > "$2" 2>&1
-}
 avg() { sed -n 's/.*video decode total=.* avg=\([0-9.]*\) ms\/frame.*/\1/p' "$1" | head -1; }
+run() {   # elf log; retried once if the run produced no result (e.g. a dcload transfer glitch)
+  local t
+  for t in 1 2; do
+    kos-tool -t "$IP" -x "$1" -m . > "$2" 2>&1
+    grep -aq 'video decoded=' "$2" && return 0
+    [ "$t" = 1 ] && echo "  retrying $1 on $(basename "$2")" >&2
+  done
+}
 pd()  { sed -n 's/.*video decoded=\([0-9]*\) presented=\([0-9]*\) dropped=\([0-9]*\).*/\1 \2\/\3/p' "$1" | head -1; }
 
 printf '%-36s %-9s %-12s %9s %9s %8s\n' fixture checksums dec/pres/drop ref_ms v2_ms delta
@@ -52,7 +57,7 @@ for fx in "$@"; do
     a=$(avg "fixture_logs/${tag}_ref_$i.log"); b=$(avg "fixture_logs/${tag}_v2_$i.log")
     [ -n "$a" ] && [ -n "$b" ] && { rs=$(echo "$rs + $a" | bc -l); vs=$(echo "$vs + $b" | bc -l); n=$((n+1)); }
   done
-  info=$(pd "fixture_logs/${tag}_v2_1.log" | tr ' ' '/')
+  info=$(for i in $(seq 1 "$N"); do pd "fixture_logs/${tag}_v2_$i.log"; done | head -1 | tr ' ' '/')
   if [ "$n" -gt 0 ]; then
     printf '%-36s %-9s %-12s %9.3f %9.3f %+8.3f\n' "$fx" "$sums" "${info:-?}" \
       "$(echo "$rs / $n" | bc -l)" "$(echo "$vs / $n" | bc -l)" "$(echo "($vs - $rs) / $n" | bc -l)"
