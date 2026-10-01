@@ -103,7 +103,9 @@ mb_hits = [w for w in literal_words(syms["_MPV_decode_mb"][0])
            if owner(w) and re.match(r"^_mpeg_decode_slice(\.lto_priv\.\d+)?$", owner(w))]
 assert len(mb_hits) == 1, mb_hits
 targets.append(("mb", "mb", "_MPV_decode_mb", mb_hits[0]))
-for nm_ in ("_ff_simple_idct_add", "_ff_simple_idct_put"):
+# PROBE_IDCT_SUFFIX=_mac probes the MPEG_IDCT_ASM=2 kernels (ff_simple_idct_{add,put}_mac)
+IDCT_SUFFIX = os.environ.get("PROBE_IDCT_SUFFIX", "")
+for nm_ in ("_ff_simple_idct_add" + IDCT_SUFFIX, "_ff_simple_idct_put" + IDCT_SUFFIX):
     targets.append(("idct", nm_[1:], nm_, find_literal(nm_, r"^_MPV_common_init$")))
 mc_names = sorted(n for n in syms if re.match(r"_(put|avg)_rnd_pixels(8|16)_(o|x|y|xy)\.lto_priv\.\d+$", n))
 assert len(mc_names) == 16, mc_names
