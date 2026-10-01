@@ -44,6 +44,24 @@ No value is best for both builds, so the default stays unpinned. To tune a build
 the set from `nm` on the unpinned ELF ((addr>>5)&511) and pin it to guard against link
 changes. A sweep of other sets was not run.
 
+## Entry prefetch (MAC_PREF) - no gain
+`pref` at kernel entry for the block (1), + constant table (2), + destination rows (3),
+each against a same-size nop control (MAC_PREF_NOP=1), ab via run_set.sh, 3 rounds,
+author's toolchain, mono Lair fixture, ms/frame:
+
+| level | control (nops) | pref | pref - control |
+|---|---|---|---|
+| 1 block | 20.357 | 20.335 | -0.022 |
+| 2 + table | 20.456 | 20.476 | +0.020 |
+| 3 + dest rows | 20.428 | 20.466 | +0.038 |
+
+Unmodified v2 is 20.263. None clears the 0.1 ms keep threshold; levels 2-3 are slightly
+worse. The nop controls alone cost +0.09..+0.19 ms versus v2 (only 8-32 bytes of added
+kernel code), i.e. text layout/size effects are larger than any prefetch effect. An entry
+pref cannot overlap enough work to hide a miss, and the dominant cold cost is likely
+instruction-cache misses, which pref cannot fetch. Knob left in, default 0. Not tried:
+prefetching the next block from the decoder loop, where there is real work to overlap.
+
 ## Open
 - 720/0 on every run: v2 is 10/12 (two 719/1 at p0); ref is 0/12.
 - Only the mono Lair fixture; stereo and 640x480 fixtures not run.
