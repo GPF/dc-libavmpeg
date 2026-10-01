@@ -7,12 +7,20 @@
 #include "libavcodec/avcodec.h"
 #include "libavformat/avformat.h"
 
-/* One MPEG-PS held in RAM, opened through the vendored libavformat with an
+/* Build with -DAV_STREAM=1 to read the file through a small buffer (AV_STREAM_BUF
+ * bytes, default 128 KB) instead of loading all of it into RAM first. */
+#ifndef AV_STREAM
+#define AV_STREAM 0
+#endif
+
+/* One MPEG-PS (held in RAM, or streamed with AV_STREAM), opened through the vendored libavformat with an
  * MPEG-1 video and an MP2 audio decoder ready. The struct must not move after
  * av_source_open() (ic->pb points into it). */
 typedef struct {
-    uint8_t *file_data;
+    uint8_t *file_data;     /* whole file; NULL when streaming */
     size_t file_size;
+    void *fp;               /* FILE *, streaming only */
+    uint8_t *iobuf;         /* ByteIOContext buffer, streaming only */
     ByteIOContext pb;
     AVFormatContext *ic;
     AVCodecContext *vc;     /* NULL if not opened */
