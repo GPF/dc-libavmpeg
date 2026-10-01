@@ -92,8 +92,26 @@ v2 misses less inside the IDCT region but ~1.8K more per frame overall: the kern
 (scratch buffer, constant table) displaces other lines outside the region. Net time is
 still lower. Slow layouts read ~27.9K in the region, so both are far from that band.
 
+## Other fixtures (tools/fixture_check.sh, author's toolchain, 2 rounds)
+First 30 decoded frames' Adler checksums must match the C reference (FRAME_TRACE builds);
+decode ms/frame from the plain builds:
+
+| fixture | checksums | ref | v2 | change |
+|---|---|---|---|---|
+| lair 320 stereo | MATCH(30) | 21.855 | 19.999 | -1.856 (-8.5%) |
+| maddog 320 29.97 fps | MATCH(30) | 21.124 | 20.468 | -0.655 (-3.1%) |
+| lair 640x480 (first 5 MB) | MATCH(30) | 64.874 | 63.561 | -1.313 (-2.0%) |
+| maddog 640x480 (first 5 MB) | MATCH(30) | 78.717 | 76.013 | -2.704 (-3.4%) |
+
+Notes: the stereo v2 figure is one valid run (the first v2 run's dcload transfer glitched
+and the script retried only after that point). The full 640x480 clips (13.8 MB) cannot be
+opened by the av player: `av_source_open` loads the whole file into RAM and runs out of
+heap while probing, for the reference build as well. The 640 rows use the first 5 MB of
+each clip with `VQ_SLOTS=4` builds; both sides drop 1-3 frames there (decode is slower
+than real time at that size). Streaming input is being worked on separately
+(branch `stream-source`).
+
 ## Open
 - 720/0 on every run: v2 is 10/12 (two 719/1 at p0); ref is 0/12.
-- Only the mono Lair fixture; stereo and 640x480 fixtures not run.
 - alias_check.py is island-specific (island sections, trampoline, private stack) and does
   not apply to the asm kernels. layout_guard.py passes (see above).
