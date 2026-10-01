@@ -32,6 +32,12 @@
 #ifndef MAC_TAB_SHIFT
 #define MAC_TAB_SHIFT 0
 #endif
+#ifndef MAC_PREF
+#define MAC_PREF 0
+#endif
+#ifndef MAC_PREF_NOP
+#define MAC_PREF_NOP 0
+#endif
 #ifndef MAC_TMP_SET
 #define MAC_TMP_SET -1
 #endif
@@ -223,10 +229,58 @@ SYM(idct_mac_tmp):
 	.endif
 	.endm
 
+	! Operand-cache prefetch at entry (experiment). MAC_PREF=1: the four lines of the
+	! coefficient block; 2: also the four lines of the constant table; 3: also the
+	! eight destination rows. MAC_PREF_NOP=1 swaps every pref for a nop, giving a
+	! control with the same code size and layout.
+	.macro PF reg
+#if MAC_PREF_NOP
+	nop
+#else
+	pref @\reg
+#endif
+	.endm
+
+	.macro PREFETCH name
+#if MAC_PREF >= 1
+	mov r6,r0
+	PF r0
+	add #32,r0
+	PF r0
+	add #32,r0
+	PF r0
+	add #32,r0
+	PF r0
+#endif
+#if MAC_PREF >= 2
+	mov.l 3f,r1
+	bra 2f
+	nop
+	.align 2
+3:	.long SYM(idct_mac_tab)
+2:	mov r1,r0
+	PF r0
+	add #32,r0
+	PF r0
+	add #32,r0
+	PF r0
+	add #32,r0
+	PF r0
+#endif
+#if MAC_PREF >= 3
+	mov r4,r0
+	.rept 8
+	PF r0
+	add r5,r0
+	.endr
+#endif
+	.endm
+
 	.macro IDCT name, isadd
 	.align 5
 	.global SYM(\name)
 SYM(\name):
+	PREFETCH \name
 	clrs
 	lds r8,fpul
 	fsts fpul,fr4

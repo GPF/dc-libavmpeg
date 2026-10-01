@@ -35,7 +35,7 @@ dc: $(B)/ref_idct.c | $(B)
 
 # MAC.W kernel (src/idct_sh4_mac.S): permuted-coefficient input
 $(B)/idct_sh4_mac.o: ../../src/idct_sh4_mac.S | $(B)
-	$(CC) -DMAC_EMU -c $< -o $@
+	$(CC) -DMAC_EMU $(ASFLAGS_X) -c $< -o $@
 $(B)/test_mac.o: test.c | $(B)
 	$(CC) -O2 -DTEST_MAC -c $< -o $@
 $(B)/idct_test_mac: $(B)/test_mac.o $(B)/ref_idct.o $(B)/idct_sh4_mac.o $(B)/abi_check.o | $(B)
