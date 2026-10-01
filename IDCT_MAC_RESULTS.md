@@ -62,6 +62,23 @@ pref cannot overlap enough work to hide a miss, and the dominant cold cost is li
 instruction-cache misses, which pref cannot fetch. Knob left in, default 0. Not tried:
 prefetching the next block from the decoder loop, where there is real work to overlap.
 
+## Shared row stage / exit (footprint) - no gain, not merged
+put and add share one row stage and one exit (kernel text 1440 -> 1120 bytes, bit-exact
+in QEMU). Branch `idct-mac-v2-footprint`. A/B vs the unshared v2 at four text offsets
+(run_set.sh, 3 rounds, ms/frame):
+
+| text shift | v2 | shared | delta |
+|---|---|---|---|
+| +0 | 20.260 | 20.445 | +0.185 |
+| +32 | 20.375 | 20.431 | +0.056 |
+| +64 | 20.355 | 20.444 | +0.089 |
+| +96 | 20.334 | 20.355 | +0.021 |
+
+Slower or equal at every offset, so the smaller instruction footprint buys nothing here,
+and the cost of the extra branches (bra + jmp @r0 per call; SH-4 has no indirect-branch
+prediction) is not repaid. The unshared kernel at +0 is also the best layout measured.
+Kept as a branch for reference only.
+
 ## Open
 - 720/0 on every run: v2 is 10/12 (two 719/1 at p0); ref is 0/12.
 - Only the mono Lair fixture; stereo and 640x480 fixtures not run.
