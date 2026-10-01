@@ -30,6 +30,14 @@
 #include "avcodec.h"
 #include "dsputil.h"
 #include "simple_idct.h"
+#if defined(MPEG_IDCT_ASM) && MPEG_IDCT_ASM == 1
+void ff_simple_idct_put_asm(uint8_t *dest, int line_size, DCTELEM *block);
+void ff_simple_idct_add_asm(uint8_t *dest, int line_size, DCTELEM *block);
+#elif defined(MPEG_IDCT_ASM) && MPEG_IDCT_ASM == 2
+/* MAC.W kernel: expects coefficients in FF_SSE2_IDCT_PERM order and does not modify the block */
+void ff_simple_idct_put_mac(uint8_t *dest, int line_size, DCTELEM *block);
+void ff_simple_idct_add_mac(uint8_t *dest, int line_size, DCTELEM *block);
+#endif
 #include "faandct.h"
 #include "faanidct.h"
 #include "mathops.h"
@@ -4360,10 +4368,23 @@ void dsputil_init(DSPContext* c, AVCodecContext *avctx)
             c->idct_put= ff_ea_idct_put_c;
             c->idct_permutation_type= FF_NO_IDCT_PERM;
         }else{ //accurate/default
+#if defined(MPEG_IDCT_ASM) && MPEG_IDCT_ASM == 1
+            c->idct_put= ff_simple_idct_put_asm;
+            c->idct_add= ff_simple_idct_add_asm;
+            c->idct    = ff_simple_idct;
+            c->idct_permutation_type= FF_NO_IDCT_PERM;
+#elif defined(MPEG_IDCT_ASM) && MPEG_IDCT_ASM == 2
+            c->idct_put= ff_simple_idct_put_mac;
+            c->idct_add= ff_simple_idct_add_mac;
+            /* c->idct stays the natural-order C version: the decoder never calls it */
+            c->idct    = ff_simple_idct;
+            c->idct_permutation_type= FF_SSE2_IDCT_PERM;
+#else
             c->idct_put= ff_simple_idct_put;
             c->idct_add= ff_simple_idct_add;
             c->idct    = ff_simple_idct;
             c->idct_permutation_type= FF_NO_IDCT_PERM;
+#endif
         }
     }
 

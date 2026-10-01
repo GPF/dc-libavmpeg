@@ -28,7 +28,7 @@ FFMPEG_SOURCES = \
 	libavutil/rational.c \
 	libavutil/avstring.c
 FFMPEG_OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(FFMPEG_SOURCES))
-OBJS = $(BUILD_DIR)/main.o src/mpeg_player.o src/pvr_video.o src/ffmpeg_codec.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(FFMPEG_OBJS)
+OBJS = $(BUILD_DIR)/main.o src/mpeg_player.o src/pvr_video.o src/ffmpeg_codec.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS)
 
 # Slice 2: MPEG-PS demux + MP2 decode (libavformat, MPEG audio, parsers).
 PROBE_TARGET = dc-libavmpeg-probe.elf
@@ -51,11 +51,11 @@ FFMPEG_AV_SOURCES = \
 	libavformat/raw.c \
 	libavformat/mpeg.c
 FFMPEG_AV_OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(FFMPEG_AV_SOURCES))
-PROBE_OBJS = src/probe_main.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
+PROBE_OBJS = src/probe_main.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
 AV_TARGET = dc-libavmpeg-av.elf
-AV_OBJS = $(BUILD_DIR)/av_main.o src/av_source.o src/pvr_video.o src/ffmpeg_av.o src/cache_profile.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
+AV_OBJS = $(BUILD_DIR)/av_main.o src/av_source.o src/pvr_video.o src/ffmpeg_av.o src/cache_profile.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
 AUDIO_TARGET = dc-libavmpeg-audio.elf
-AUDIO_OBJS = src/audio_main.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
+AUDIO_OBJS = src/audio_main.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
 DC_IP ?=
 MPEG_BENCHMARK ?= 1
 MPEG_EXTRA_CFLAGS ?=
@@ -63,9 +63,26 @@ MPEG_CROP_ALIGN ?= 16384
 # Reserve the 512-byte island at the low end of KOS's 16 MB main-thread stack.
 MPEG_ISLAND_STACK_ADDR ?= 0x8cff3e00
 PROBE_VERBOSE ?= 0
+# MPEG_IDCT_ASM selects a hand-written SH-4 integer IDCT for the default
+# FF_IDCT_SIMPLE path; both bypass the island trampoline. dsputil.o is not
+# rebuilt when this changes: use a separate BUILD_DIR or clean.
+#   1  src/idct_sh4.S      frame-less muls.w kernel, natural coefficient order
+#   2  src/idct_sh4_mac.S  mac.w kernel, FF_SSE2_IDCT_PERM coefficient order
+MPEG_IDCT_ASM ?= 0
 
 ifeq ($(MPEG_BENCHMARK),1)
 KOS_CFLAGS += -DMPEG_BENCHMARK=1
+endif
+
+ifeq ($(MPEG_IDCT_ASM),1)
+KOS_CFLAGS += -DMPEG_IDCT_ASM=1
+IDCT_ASM_OBJS = $(BUILD_DIR)/idct_sh4.o
+else ifeq ($(MPEG_IDCT_ASM),2)
+KOS_CFLAGS += -DMPEG_IDCT_ASM=2
+IDCT_ASM_OBJS = $(BUILD_DIR)/idct_sh4_mac.o
+else
+ISLAND_LD = $(BUILD_DIR)/idct-island.ld
+ISLAND_LDFLAGS = -Wl,-T,$(BUILD_DIR)/idct-island.ld -Wl,--section-start=.idct_private_stack=$(MPEG_ISLAND_STACK_ADDR)
 endif
 
 KOS_CFLAGS += $(MPEG_EXTRA_CFLAGS)
@@ -87,17 +104,17 @@ $(BUILD_DIR)/island-layout-pre.elf: $(OBJS)
 $(BUILD_DIR)/idct-island.ld: $(BUILD_DIR)/island-layout-pre.elf tools/island_layout.py
 	python3 tools/island_layout.py $< --linker-script $@
 
-$(TARGET): $(OBJS) $(BUILD_DIR)/idct-island.ld
-	kos-cc -Wl,-T,$(BUILD_DIR)/idct-island.ld -Wl,--section-start=.idct_private_stack=$(MPEG_ISLAND_STACK_ADDR) -o $@ $(OBJS)
+$(TARGET): $(OBJS) $(ISLAND_LD)
+	kos-cc $(ISLAND_LDFLAGS) -o $@ $(OBJS)
 
-$(PROBE_TARGET): $(PROBE_OBJS) $(BUILD_DIR)/idct-island.ld
-	kos-cc -Wl,-T,$(BUILD_DIR)/idct-island.ld -Wl,--section-start=.idct_private_stack=$(MPEG_ISLAND_STACK_ADDR) -o $@ $(PROBE_OBJS)
+$(PROBE_TARGET): $(PROBE_OBJS) $(ISLAND_LD)
+	kos-cc $(ISLAND_LDFLAGS) -o $@ $(PROBE_OBJS)
 
-$(AUDIO_TARGET): $(AUDIO_OBJS) $(BUILD_DIR)/idct-island.ld
-	kos-cc -Wl,-T,$(BUILD_DIR)/idct-island.ld -Wl,--section-start=.idct_private_stack=$(MPEG_ISLAND_STACK_ADDR) -o $@ $(AUDIO_OBJS)
+$(AUDIO_TARGET): $(AUDIO_OBJS) $(ISLAND_LD)
+	kos-cc $(ISLAND_LDFLAGS) -o $@ $(AUDIO_OBJS)
 
-$(AV_TARGET): $(AV_OBJS) $(BUILD_DIR)/idct-island.ld
-	kos-cc -Wl,-T,$(BUILD_DIR)/idct-island.ld -Wl,--section-start=.idct_private_stack=$(MPEG_ISLAND_STACK_ADDR) -o $@ $(AV_OBJS)
+$(AV_TARGET): $(AV_OBJS) $(ISLAND_LD)
+	kos-cc $(ISLAND_LDFLAGS) -o $@ $(AV_OBJS)
 
 av: $(AV_TARGET)
 
@@ -131,6 +148,14 @@ $(BUILD_DIR)/av_main.o: src/av_main.c
 $(BUILD_DIR)/main.o: src/main.c
 	mkdir -p $(BUILD_DIR)
 	kos-cc $(KOS_CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/idct_sh4.o: src/idct_sh4.S
+	mkdir -p $(BUILD_DIR)
+	kos-cc $(KOS_CFLAGS) -DASM_UNDERSCORE -c $< -o $@
+
+$(BUILD_DIR)/idct_sh4_mac.o: src/idct_sh4_mac.S
+	mkdir -p $(BUILD_DIR)
+	kos-cc $(KOS_CFLAGS) -DASM_UNDERSCORE -c $< -o $@
 
 $(BUILD_DIR)/idct_island_asm.o: src/idct_island.S
 	mkdir -p $(BUILD_DIR)
