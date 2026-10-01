@@ -11,7 +11,7 @@
  *   0  whole file preloaded into RAM (default; clip must fit the free heap)
  *   1  read through a small buffer (AV_STREAM_BUF bytes, default 16 KB); every
  *      read blocks the demuxer
- *   2  prebuffer ring (AV_RING_BYTES, default 4 MB, filled before playback and
+ *   2  prebuffer ring (AV_RING_BYTES, default 2 MB, filled before playback and
  *      topped up in AV_RING_CHUNK pieces by av_source_pump() when the player is
  *      idle); the demuxer only copies from RAM unless the ring runs dry */
 #ifndef AV_STREAM

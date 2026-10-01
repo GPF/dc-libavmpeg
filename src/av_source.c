@@ -1,6 +1,7 @@
 #include "av_source.h"
 
 #include <stdio.h>
+#include <malloc.h>
 #include <string.h>
 
 #include "libavutil/mem.h"
@@ -41,10 +42,10 @@ static int64_t stream_seek(void *opaque, int64_t offset, int whence) {
 
 #if AV_STREAM == 2
 #ifndef AV_RING_BYTES
-#define AV_RING_BYTES (4 * 1024 * 1024)
+#define AV_RING_BYTES (2 * 1024 * 1024)
 #endif
 #ifndef AV_RING_CHUNK
-#define AV_RING_CHUNK (32 * 1024)
+#define AV_RING_CHUNK (16 * 1024)
 #endif
 
 /* The file position of fp always equals ring_end. File offset o lives at
@@ -274,10 +275,23 @@ void av_source_close(av_source_t *src) {
     src->vidx = src->aidx = -1;
 }
 
+#if AV_STREAM == 2
+static void heap_line(const char *when) {
+    struct mallinfo mi = mallinfo();
+
+    printf("av: heap %s: arena=%d in use=%d free=%d\n", when, mi.arena, mi.uordblks,
+           mi.fordblks);
+}
+#endif
+
 void av_source_prefill(av_source_t *src) {
 #if AV_STREAM == 2
     while (src->ring && ring_fill(src, 64 * 1024) > 0)
         ;
+    /* statistics below should describe playback, not stream probing */
+    src->ring_pump_n = src->ring_block_n = 0;
+    src->ring_min_ahead = (size_t)-1;
+    heap_line("after prefill");
 #else
     (void)src;
 #endif
@@ -302,6 +316,7 @@ void av_source_print_stats(const av_source_t *src) {
     printf("av: input ring %lu KB: idle top-ups=%lu blocking refills=%lu min bytes ahead=%lu\n",
            (unsigned long)(AV_RING_BYTES / 1024), src->ring_pump_n, src->ring_block_n,
            (unsigned long)(src->ring_min_ahead == (size_t)-1 ? 0 : src->ring_min_ahead));
+    heap_line("at end");
 #else
     (void)src;
 #endif
