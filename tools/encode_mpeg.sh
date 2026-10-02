@@ -15,18 +15,21 @@
 #   --channels N     1 or 2                 (1)
 #   --abit RATE      audio bitrate          (64k; use 96k for stereo)
 #   --expect N       fail unless the video has exactly N pictures
+#   --limit SECS     encode only the first SECS seconds (to try settings quickly)
+#   --vf FILTER      ffmpeg video filter(s) applied before the scale, e.g. yadif=0 to
+#                    deinterlace, or crop=704:464:8:8
 #
 # Needs ffmpeg and python3 (tools/build_pidx.py). Closed GOPs plus a short GOP keep
 # avmpeg_seek_frame() cheap and make every I-frame a clean landing point.
 set -euo pipefail
 
 if [ $# -lt 3 ]; then
-    sed -n "2,21p" "$0" | sed 's/^# \{0,1\}//'
+    sed -n "2,22p" "$0" | sed 's/^# \{0,1\}//'
     exit 1
 fi
 VIDEO=$1; AUDIO=$2; OUT=$3; shift 3
 
-SIZE=320x240; FPS=24000/1001; VBIT=1500k; GOP=12; RATE=22050; CH=1; ABIT=64k; EXPECT=
+SIZE=320x240; FPS=24000/1001; VBIT=1500k; GOP=12; RATE=22050; CH=1; ABIT=64k; EXPECT=; LIMIT=; VF=
 while [ $# -gt 0 ]; do
     case "$1" in
         --size) SIZE=$2 ;;
@@ -37,6 +40,8 @@ while [ $# -gt 0 ]; do
         --channels) CH=$2 ;;
         --abit) ABIT=$2 ;;
         --expect) EXPECT=$2 ;;
+        --limit) LIMIT=$2 ;;
+        --vf) VF=$2 ;;
         *) echo "unknown option $1" >&2; exit 1 ;;
     esac
     shift 2
@@ -52,7 +57,7 @@ echo "== source audio"; ffprobe -v error -select_streams a:0 \
     -show_entries stream=codec_name,sample_rate,channels,duration -of default=nw=1 "$AUDIO" || true
 
 ffmpeg -hide_banner -y -framerate "$FPS" -i "$VIDEO" -i "$AUDIO" -map 0:v:0 -map 1:a:0 \
-    -vf "scale=${W}:${H}:flags=lanczos,setsar=1" -r "$FPS" \
+    -vf "${VF:+$VF,}scale=${W}:${H}:flags=lanczos,setsar=1" -r "$FPS" ${LIMIT:+-t "$LIMIT"} \
     -c:v mpeg1video -b:v "$VBIT" \
     -g "$GOP" -bf 2 -flags +cgop -sc_threshold 1000000000 \
     -c:a mp2 -ar "$RATE" -ac "$CH" -b:a "$ABIT" \
