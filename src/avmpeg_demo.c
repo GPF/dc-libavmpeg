@@ -161,67 +161,76 @@ int main(void) {
             static const long targets[] = { 0, 7, 120, 480, 700, 100, 400 };
             char pidx[256];
             char *dot;
-            unsigned t;
+            unsigned pass_no, t;
 
             snprintf(pidx, sizeof(pidx), "%s", path);
             dot = strrchr(pidx, '.');
             if (dot)
                 strcpy(dot, ".pidx");
             avmpeg_verbose = 1;
-            m = avmpeg_open(path, NULL);
-            if (!m || avmpeg_load_index(m, pidx) != 0) {
-                printf("avmpeg_demo: no seek index (%s), skipping the seek check\n", pidx);
-                avmpeg_close(m);
-                printf("avmpeg_demo: done\n");
-                return 0;
-            }
-            printf("avmpeg_demo seek: index loaded, picture count %ld (full pass decoded %lu)\n",
-                   avmpeg_frame_count(m), total);
-            for (t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
-                long want = targets[t];
-                uint64_t t0 = timer_us_gettime64(), dt;
-                unsigned bad = 0, n = 0;
-                int ar;
+            /* pass 0: a fresh decoder per seek; pass 1: one decoder for all seeks.
+             * If only pass 1 goes wrong, state leaks across seeks. */
+            for (pass_no = 0; pass_no < 2; pass_no++) {
+                printf("avmpeg_demo seek: ---- %s ----\n",
+                       pass_no ? "one decoder for all seeks" : "fresh decoder per seek");
+                m = NULL;
+                for (t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
+                    long want = targets[t];
+                    uint64_t t0, dt;
+                    unsigned n = 0;
 
-                if (avmpeg_seek_frame(m, want) != 0) {
-                    printf("avmpeg_demo seek: frame %ld: seek failed\n", want);
-                    continue;
-                }
-                dt = timer_us_gettime64() - t0;
-                /* where does each frame the library returns sit in the full pass? */
-                printf("avmpeg_demo seek: frame %ld (%.1f ms): returned index -> full-pass index:", want,
-                       dt / 1000.0);
-                while (n < 8) {
-                    uint32_t c[3];
-                    unsigned long j, hit = (unsigned long)-1;
-
-                    r = avmpeg_video_next(m, &g);
-                    if (r == AVMPEG_AGAIN) {
-                        drain_audio(m, pcm, 1152);
+                    if (!m || pass_no == 0) {
+                        avmpeg_close(m);
+                        m = avmpeg_open(path, NULL);
+                        if (!m || avmpeg_load_index(m, pidx) != 0) {
+                            printf("avmpeg_demo: no seek index (%s), skipping the seek check\n", pidx);
+                            avmpeg_close(m);
+                            printf("avmpeg_demo: done\n");
+                            return 0;
+                        }
+                    }
+                    t0 = timer_us_gettime64();
+                    if (avmpeg_seek_frame(m, want) != 0) {
+                        printf("avmpeg_demo seek: frame %ld: seek failed\n", want);
                         continue;
                     }
-                    if (r != AVMPEG_OK)
-                        break;
-                    c[0] = adler_plane(g.plane[0], g.stride[0], g.width, g.height);
-                    c[1] = adler_plane(g.plane[1], g.stride[1], g.width / 2, g.height / 2);
-                    c[2] = adler_plane(g.plane[2], g.stride[2], g.width / 2, g.height / 2);
-                    for (j = 0; j < total; j++)
-                        if (!memcmp(sums[j], c, sizeof(c))) {
-                            hit = j;
-                            break;
+                    dt = timer_us_gettime64() - t0;
+                    printf("avmpeg_demo seek: frame %ld took %.1f ms\n", want, dt / 1000.0);
+                    while (n < 4) {
+                        uint32_t c[3];
+                        unsigned long j, first = (unsigned long)-1, last = 0, cnt = 0;
+
+                        r = avmpeg_video_next(m, &g);
+                        if (r == AVMPEG_AGAIN) {
+                            drain_audio(m, pcm, 1152);
+                            continue;
                         }
-                    if (hit == (unsigned long)-1)
-                        printf(" %lu->none(type %d)", g.index, g.pict_type);
-                    else
-                        printf(" %lu->%lu%s", g.index, hit, hit == g.index ? "" : "*");
-                    n++;
+                        if (r != AVMPEG_OK)
+                            break;
+                        c[0] = adler_plane(g.plane[0], g.stride[0], g.width, g.height);
+                        c[1] = adler_plane(g.plane[1], g.stride[1], g.width / 2, g.height / 2);
+                        c[2] = adler_plane(g.plane[2], g.stride[2], g.width / 2, g.height / 2);
+                        for (j = 0; j < total; j++)
+                            if (!memcmp(sums[j], c, sizeof(c))) {
+                                if (first == (unsigned long)-1)
+                                    first = j;
+                                last = j;
+                                cnt++;
+                            }
+                        printf("  idx %lu type %d y=%08lx: expected y=%08lx %s; matches full-pass frames: ",
+                               g.index, g.pict_type, (unsigned long)c[0],
+                               g.index < total ? (unsigned long)sums[g.index][0] : 0UL,
+                               g.index < total && !memcmp(sums[g.index], c, sizeof(c)) ? "OK" : "WRONG");
+                        if (cnt)
+                            printf("%lu..%lu (%lu)\n", first, last, cnt);
+                        else
+                            printf("none\n");
+                        n++;
+                    }
+                    printf("  first audio read after: %d\n", avmpeg_audio_read(m, pcm, 1152));
                 }
-                printf("\n");
-                ar = avmpeg_audio_read(m, pcm, 1152);
-                printf("avmpeg_demo seek: frame %ld: first audio read after: %d\n", want, ar);
-                (void)bad;
+                avmpeg_close(m);
             }
-            avmpeg_close(m);
         }
     }
     printf("avmpeg_demo: done\n");
