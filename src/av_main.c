@@ -813,6 +813,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     printf("av: opened %s (%lu bytes)\n", path, (unsigned long)src.file_size);
+    av_source_prefill(&src);
 #ifdef MPEG_DECODE_PROFILE
 #ifdef MPEG_CACHE_PROFILE_EVENT
     perf_cntr_clear(PRFC1);
@@ -1057,7 +1058,7 @@ int main(int argc, char **argv) {
                 afifo_empty_iters++;
         }
         prev_it = cur_it;
-        if (!progressed)
+        if (!progressed && !av_source_pump(&src))
             thd_sleep(2);
     }
 
@@ -1080,6 +1081,7 @@ int main(int argc, char **argv) {
         }
         printf("av: video decoded=%lu presented=%lu dropped=%lu errors=%lu "
                "(fixture has 720)\n", vframes, presented, dropped, verrors);
+        av_source_print_stats(&src);
 #ifdef MPEG_AV_FRAME_TRACE
         printf("av: FRAME_TRACE checksum_samples=%u presented=%lu drops=%u overflow=%lu\n",
                av_checksum_trace_n, presented, av_drop_trace_n,
