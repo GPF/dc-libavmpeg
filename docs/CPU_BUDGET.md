@@ -112,6 +112,14 @@ paths have barely changed upstream since about 2009, so there is little to gain.
 Not checked: bit-exactness against 0.5 (first master frame: `y=61c1c10f u=76ab822c
 v=76ab822c`), and the benchmark decodes 719 of 720 frames (parser tail not flushed).
 
+## DCSinge integration -- status
+
+The decisions above are implemented: DCSinge's `dcfmv` has an MPEG backend (MP2 through the
+interleaved KOS stream callback, FFmpeg 0.5 decoder with the MAC.W IDCT) and plays the full
+Dragon's Lair on real hardware via a GD-EMU. See `docs/AVMPEG_API.md` for the library API, the
+seek behaviour and what has and has not been measured. CPU headroom under the game's Lua load is
+still unmeasured; the deferred levers below stay deferred until it is.
+
 ## Reproducing
 
 ```

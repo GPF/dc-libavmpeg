@@ -40,6 +40,10 @@ typedef struct {
     int aidx;
 } av_source_t;
 
+/* Hooks called around file reads/seeks in the streaming modes (may be NULL). */
+extern void (*av_source_io_lock)(void);
+extern void (*av_source_io_unlock)(void);
+
 #define AV_SOURCE_NO_FILE (-2)
 
 /* Returns 0, AV_SOURCE_NO_FILE (nothing printed) if the file cannot be read,

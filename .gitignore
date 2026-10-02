@@ -27,3 +27,4 @@
 
 # Scratch deliverables from IDCT work (ELFs, logs, tarballs).
 /out/
+libavmpeg.a
