@@ -8,6 +8,7 @@
  * The clip is the `fixture=` line of /pc/config.ini under /pc/fixtures/ (run from
  * the repo root with kos-tool -m .). Build: tools/ffmaster_bench/Makefile. */
 #include <kos.h>
+#include <malloc.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -128,8 +129,15 @@ static int run_pass(const char *path, int pass) {
         vc = avcodec_alloc_context3(c);
         avcodec_parameters_to_context(vc, fmt->streams[vidx]->codecpar);
         vc->thread_count = 1;
-        if (!c || avcodec_open2(vc, c, NULL) < 0) {
-            printf("ffbench: video decoder open failed\n");
+        int oret = c ? avcodec_open2(vc, c, NULL) : -1;
+
+        if (oret < 0) {
+            char eb[80];
+
+            av_strerror(oret, eb, sizeof(eb));
+            printf("ffbench: video decoder open failed: codec_id=%d decoder=%s ret=%d (%s) %dx%d\n",
+                   (int)fmt->streams[vidx]->codecpar->codec_id, c ? c->name : "NULL", oret, eb,
+                   vc->width, vc->height);
             return -1;
         }
     }
@@ -139,8 +147,10 @@ static int run_pass(const char *path, int pass) {
         ac = avcodec_alloc_context3(c);
         avcodec_parameters_to_context(ac, fmt->streams[aidx]->codecpar);
         ac->thread_count = 1;
-        if (!c || avcodec_open2(ac, c, NULL) < 0) {
-            printf("ffbench: audio decoder open failed\n");
+        int oret = c ? avcodec_open2(ac, c, NULL) : -1;
+
+        if (oret < 0) {
+            printf("ffbench: audio decoder open failed: ret=%d decoder=%s\n", oret, c ? c->name : "NULL");
             return -1;
         }
     }
@@ -246,6 +256,10 @@ int main(void) {
     fixture_name(fixture, sizeof(fixture));
     snprintf(path, sizeof(path), "/pc/fixtures/%s", fixture);
     printf("ffbench: streaming %s\n", path);
+    {
+        struct mallinfo mi = mallinfo();
+        printf("ffbench: heap at start: arena=%d inuse=%d\n", mi.arena, mi.uordblks);
+    }
     av_log_set_level(AV_LOG_ERROR);
     for (pass = 1; pass <= PASSES; pass++)
         if (run_pass(path, pass) != 0)
