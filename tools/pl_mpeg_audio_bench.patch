@@ -1,6 +1,38 @@
+diff --git a/examples/basic/Makefile b/examples/basic/Makefile
+index d7d0ab1..7b8d86c 100644
+--- a/examples/basic/Makefile
++++ b/examples/basic/Makefile
+@@ -27,6 +27,9 @@ endif
+ ifdef BENCH_NEXTFRAME
+ KOS_CFLAGS += -DBENCH_NEXTFRAME
+ endif
++ifdef BENCH_AUDIO
++KOS_CFLAGS += -DBENCH_AUDIO
++endif
+ ifdef BENCH_PERF
+ KOS_CFLAGS += -DBENCH_PERF
+ endif
+diff --git a/examples/basic/example.c b/examples/basic/example.c
+index 09260b5..578f560 100644
+--- a/examples/basic/example.c
++++ b/examples/basic/example.c
+@@ -737,7 +737,10 @@ int main(void) {
+ 
+     //play_simple();
+     //play_extended();
+-#ifdef BENCH_MEMTEST
++#ifdef BENCH_AUDIO
++    /* add -DBENCH_AUDIO; uses BENCH_PATH (default Lair 320x240 mono) */
++    mpeg_bench_audio_decode(BENCH_PATH, 4);
++#elif defined(BENCH_MEMTEST)
+     play_memtest();
+ #elif defined(BENCH_PERF)
+     play_perf();
+diff --git a/mpeg.c b/mpeg.c
+index 66ac03e..bd1da25 100644
 --- a/mpeg.c
 +++ b/mpeg.c
-@@ -985,3 +985,89 @@
+@@ -985,3 +985,89 @@ static int setup_audio(mpeg_player_t *player) {
  
      return 0;
  }
@@ -90,9 +122,11 @@
 +    printf("plbench: done\n");
 +    MPEG_FREE(buf);
 +}
+diff --git a/mpeg.h b/mpeg.h
+index 3d98063..61ca8f0 100644
 --- a/mpeg.h
 +++ b/mpeg.h
-@@ -741,6 +741,10 @@
+@@ -741,6 +741,10 @@ size_t mpeg_frame_data(mpeg_player_t *player, const void **data);
   */
  void mpeg_draw_frame(mpeg_player_t *player);
  
@@ -103,17 +137,3 @@
  #ifdef __cplusplus
  }
  #endif
---- a/example.c
-+++ b/example.c
-@@ -737,7 +737,10 @@
- 
-     //play_simple();
-     //play_extended();
--#ifdef BENCH_MEMTEST
-+#ifdef BENCH_AUDIO
-+    /* add -DBENCH_AUDIO; uses BENCH_PATH (default Lair 320x240 mono) */
-+    mpeg_bench_audio_decode(BENCH_PATH, 4);
-+#elif defined(BENCH_MEMTEST)
-     play_memtest();
- #elif defined(BENCH_PERF)
-     play_perf();
