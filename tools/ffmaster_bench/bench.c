@@ -85,6 +85,8 @@ static int run_pass(const char *path, int pass) {
     AVCodecContext *vc = NULL, *ac = NULL;
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
+    AVCodecParserContext *vpar = NULL, *apar = NULL;
+    AVPacket *opkt = NULL;
     int vidx = -1, aidx = -1, ret;
     unsigned i;
     uint64_t vdec_us = 0, vdec_max = 0, adec_us = 0, adec_max = 0;
@@ -164,10 +166,20 @@ static int run_pass(const char *path, int pass) {
 
     printf("ffbench: pass %d decoding\n", pass);
     fflush(stdout);
+    /* The PS demuxer hands out PES payloads, not whole frames: run the stream
+     * through the codec parsers (as libavformat's own need_parsing would). */
+    vpar = av_parser_init(vc->codec_id);
+    apar = ac ? av_parser_init(ac->codec_id) : NULL;
+    if (!vpar || (ac && !apar)) {
+        printf("ffbench: parser init failed\n");
+        return -1;
+    }
+    opkt = av_packet_alloc();
     for (;;) {
         AVCodecContext *dc;
-        uint64_t t0, dt;
-        int got = 0;
+        AVCodecParserContext *pc;
+        const uint8_t *pd;
+        int ps;
 
         ret = av_read_frame(fmt, pkt);
         if (ret < 0)
@@ -177,47 +189,59 @@ static int run_pass(const char *path, int pass) {
             av_packet_unref(pkt);
             continue;
         }
-        t0 = timer_us_gettime64();
-        if (avcodec_send_packet(dc, pkt) < 0) {
-            if (dc == ac) aerr++;
-            av_packet_unref(pkt);
-            continue;
-        }
-        while (avcodec_receive_frame(dc, frame) >= 0) {
-            got++;
-            if (dc == vc) {
-                if (vframes < CHECKSUM_FRAMES) {
-                    /* checksum time is excluded below by subtracting it */
-                    uint64_t c0 = timer_us_gettime64();
+        pc = dc == vc ? vpar : apar;
+        pd = pkt->data;
+        ps = pkt->size;
+        while (ps > 0) {
+            uint8_t *od = NULL;
+            int os = 0, used;
+            uint64_t t0 = timer_us_gettime64(), dt;
 
-                    sums[vframes][0] = adler_plane(frame->data[0], frame->linesize[0], vc->width, vc->height);
-                    sums[vframes][1] = adler_plane(frame->data[1], frame->linesize[1], vc->width / 2, vc->height / 2);
-                    sums[vframes][2] = adler_plane(frame->data[2], frame->linesize[2], vc->width / 2, vc->height / 2);
-                    t0 += timer_us_gettime64() - c0;
+            used = av_parser_parse2(pc, dc, &od, &os, pd, ps, pkt->pts, pkt->dts, pkt->pos);
+            pd += used;
+            ps -= used;
+            if (os > 0) {
+                opkt->data = od;
+                opkt->size = os;
+                if (avcodec_send_packet(dc, opkt) < 0) {
+                    if (dc == ac) aerr++;
+                } else {
+                    while (avcodec_receive_frame(dc, frame) >= 0) {
+                        if (dc == vc) {
+                            if (vframes < CHECKSUM_FRAMES) {
+                                /* checksum time is excluded from the timing */
+                                uint64_t c0 = timer_us_gettime64();
+
+                                sums[vframes][0] = adler_plane(frame->data[0], frame->linesize[0], vc->width, vc->height);
+                                sums[vframes][1] = adler_plane(frame->data[1], frame->linesize[1], vc->width / 2, vc->height / 2);
+                                sums[vframes][2] = adler_plane(frame->data[2], frame->linesize[2], vc->width / 2, vc->height / 2);
+                                t0 += timer_us_gettime64() - c0;
+                            }
+                            vframes++;
+                            if (vframes % 100 == 0) {
+                                printf("ffbench: pass %d: %lu video frames, %lu audio frames\n", pass, vframes, aframes);
+                                fflush(stdout);
+                            }
+                        } else {
+                            aframes++;
+                            asamples += (unsigned long long)frame->nb_samples;
+                        }
+                        av_frame_unref(frame);
+                    }
                 }
-                vframes++;
-                if (vframes % 100 == 0) {
-                    printf("ffbench: pass %d: %lu video frames, %lu audio frames\n", pass, vframes, aframes);
-                    fflush(stdout);
-                }
-            } else {
-                aframes++;
-                asamples += (unsigned long long)frame->nb_samples;
             }
-            av_frame_unref(frame);
-        }
-        dt = timer_us_gettime64() - t0;
-        if (dc == vc) {
-            vdec_us += dt;
-            vpk++;
-            if (dt > vdec_max) vdec_max = dt;
-        } else {
-            adec_us += dt;
-            apk++;
-            if (dt > adec_max) adec_max = dt;
+            dt = timer_us_gettime64() - t0;
+            if (dc == vc) {
+                vdec_us += dt;
+                if (os > 0) vpk++;
+                if (dt > vdec_max) vdec_max = dt;
+            } else {
+                adec_us += dt;
+                if (os > 0) apk++;
+                if (dt > adec_max) adec_max = dt;
+            }
         }
         av_packet_unref(pkt);
-        (void)got;
     }
     /* flush the video decoder (delayed B/P frames) */
     {
@@ -254,6 +278,10 @@ static int run_pass(const char *path, int pass) {
     avcodec_free_context(&ac);
     av_frame_free(&frame);
     av_packet_free(&pkt);
+    opkt->data = NULL; opkt->size = 0;
+    av_packet_free(&opkt);
+    av_parser_close(vpar);
+    if (apar) av_parser_close(apar);
     avformat_close_input(&fmt);
     av_freep(&io->buffer);
     avio_context_free(&io);
