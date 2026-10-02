@@ -54,6 +54,11 @@ FFMPEG_AV_OBJS = $(patsubst %.c,$(BUILD_DIR)/%.o,$(FFMPEG_AV_SOURCES))
 PROBE_OBJS = src/probe_main.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
 AV_TARGET = dc-libavmpeg-av.elf
 AV_OBJS = $(BUILD_DIR)/av_main.o src/av_source.o src/pvr_video.o src/ffmpeg_av.o src/cache_profile.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
+# Decoder library (src/avmpeg.h) and the demo that exercises only its API.
+AVMPEG_LIB_OBJS = src/avmpeg.o src/av_source.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
+AVMPEG_LIB = libavmpeg.a
+DEMO_TARGET = dc-libavmpeg-demo.elf
+DEMO_OBJS = src/avmpeg_demo.o $(AVMPEG_LIB_OBJS)
 AUDIO_TARGET = dc-libavmpeg-audio.elf
 AUDIO_OBJS = src/audio_main.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
 AUDIOBENCH_TARGET = dc-libavmpeg-audiobench.elf
@@ -124,6 +129,19 @@ $(AV_TARGET): $(AV_OBJS) $(ISLAND_LD)
 	kos-cc $(ISLAND_LDFLAGS) -o $@ $(AV_OBJS)
 
 av: $(AV_TARGET)
+
+$(DEMO_TARGET): $(DEMO_OBJS) $(ISLAND_LD)
+	kos-cc $(ISLAND_LDFLAGS) -o $@ $(DEMO_OBJS)
+
+demo: $(DEMO_TARGET)
+
+# Static library for embedding (DCSinge). The IDCT island needs the generated
+# linker script: link the final program with $(ISLAND_LDFLAGS) as the targets here do.
+$(AVMPEG_LIB): $(AVMPEG_LIB_OBJS)
+	rm -f $@
+	$(KOS_AR) rcs $@ $(AVMPEG_LIB_OBJS)
+
+lib: $(AVMPEG_LIB)
 
 run-av: $(AV_TARGET)
 	@test -n "$(DC_IP)" || { echo "Set DC_IP to the Dreamcast dcload-ip address"; exit 2; }
