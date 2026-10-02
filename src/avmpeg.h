@@ -52,6 +52,8 @@ typedef struct {
     int width, height;
     unsigned long index;        /* display-order frame number since open or seek */
     int pict_type;              /* 1 = I, 2 = P, 3 = B (FFmpeg picture types) */
+    int64_t src_pos;            /* file offset of the packet whose decode returned this frame
+                                   (diagnostic; -1 if unknown) */
 } avmpeg_frame_t;
 
 /* Cumulative, microseconds spent inside the library; reset with avmpeg_reset_stats(). */

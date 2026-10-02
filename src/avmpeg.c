@@ -29,6 +29,7 @@ struct avmpeg {
     int demux_eof;
     int video_flushed;
     unsigned long vindex;
+    int64_t last_vpos;          /* pos of the last video packet fed to the decoder */
     struct { double time; uint32_t off; } *idx;   /* .pidx entries */
     uint32_t idx_count;
     long picture_count;
@@ -198,6 +199,7 @@ int avmpeg_video_next(avmpeg_t *m, avmpeg_frame_t *out) {
         if (m->vfifo.count) {
             AVPacket *p = fifo_front(&m->vfifo);
 
+            m->last_vpos = p->pos;
             decode_video_packet(m, p->data, p->size, &got);
             fifo_pop(&m->vfifo);
         } else {
@@ -227,6 +229,7 @@ int avmpeg_video_next(avmpeg_t *m, avmpeg_frame_t *out) {
             out->height = m->info.height;
             out->index = m->vindex++;
             out->pict_type = m->frame->pict_type;
+            out->src_pos = m->last_vpos;
             m->stats.video_frames++;
             return AVMPEG_OK;
         }
