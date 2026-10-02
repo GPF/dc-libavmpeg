@@ -134,7 +134,7 @@ int main(void) {
      * above because it pollutes the caches.) */
     {
         static uint32_t sums[MAX_FRAMES][3];
-        unsigned long total = 0, k, land = (unsigned long)-1, bad = 0, first_bad = 0;
+        unsigned long total = 0;
         avmpeg_frame_t g;
 
         m = avmpeg_open(path, NULL);
@@ -157,55 +157,60 @@ int main(void) {
         }
         avmpeg_close(m);
 
-        m = avmpeg_open(path, NULL);
-        if (!m || avmpeg_seek(m, SEEK_TO_S) != 0) {
-            printf("avmpeg_demo: seek to %.1f s failed (input cannot seek)\n", SEEK_TO_S);
-            avmpeg_close(m);
-            return 1;
-        }
-        for (k = 0; k < SEEK_FRAMES;) {
-            uint32_t c[3];
+        {
+            static const long targets[] = { 7, 120, 480, 700, 100, 0, 400 };
+            char pidx[256];
+            char *dot;
+            unsigned t;
 
-            r = avmpeg_video_next(m, &g);
-            if (r == AVMPEG_AGAIN) {
-                drain_audio(m, pcm, 1152);
-                continue;
+            snprintf(pidx, sizeof(pidx), "%s", path);
+            dot = strrchr(pidx, '.');
+            if (dot)
+                strcpy(dot, ".pidx");
+            m = avmpeg_open(path, NULL);
+            if (!m || avmpeg_load_index(m, pidx) != 0) {
+                printf("avmpeg_demo: no seek index (%s), skipping the seek check\n", pidx);
+                avmpeg_close(m);
+                printf("avmpeg_demo: done\n");
+                return 0;
             }
-            if (r != AVMPEG_OK)
-                break;
-            c[0] = adler_plane(g.plane[0], g.stride[0], g.width, g.height);
-            c[1] = adler_plane(g.plane[1], g.stride[1], g.width / 2, g.height / 2);
-            c[2] = adler_plane(g.plane[2], g.stride[2], g.width / 2, g.height / 2);
-            if (k == 0) {
-                unsigned long j;
+            printf("avmpeg_demo seek: index loaded, picture count %ld (full pass decoded %lu)\n",
+                   avmpeg_frame_count(m), total);
+            for (t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
+                long want = targets[t];
+                uint64_t t0 = timer_us_gettime64(), dt;
+                unsigned bad = 0, n = 0;
+                int ar;
 
-                for (j = 0; j < total; j++)
-                    if (!memcmp(sums[j], c, sizeof(c))) {
-                        land = j;
-                        break;
+                if (avmpeg_seek_frame(m, want) != 0) {
+                    printf("avmpeg_demo seek: frame %ld: seek failed\n", want);
+                    continue;
+                }
+                dt = timer_us_gettime64() - t0;
+                while (n < 6 && (unsigned long)(want + n) < total) {
+                    uint32_t c[3];
+
+                    r = avmpeg_video_next(m, &g);
+                    if (r == AVMPEG_AGAIN) {
+                        drain_audio(m, pcm, 1152);
+                        continue;
                     }
-                printf("avmpeg_demo seek: to %.1f s, first frame type %d %s", SEEK_TO_S,
-                       g.pict_type, land == (unsigned long)-1 ? "matches NO frame of the full pass\n" : "");
-                if (land != (unsigned long)-1)
-                    printf("= frame %lu of the full pass (%.3f s)\n", land,
-                           (double)land * avmpeg_info(m)->frame_us / 1e6);
+                    if (r != AVMPEG_OK)
+                        break;
+                    c[0] = adler_plane(g.plane[0], g.stride[0], g.width, g.height);
+                    c[1] = adler_plane(g.plane[1], g.stride[1], g.width / 2, g.height / 2);
+                    c[2] = adler_plane(g.plane[2], g.stride[2], g.width / 2, g.height / 2);
+                    if (g.index != (unsigned long)(want + n) || memcmp(sums[want + n], c, sizeof(c)))
+                        bad++;
+                    n++;
+                }
+                ar = avmpeg_audio_read(m, pcm, 1152);
+                printf("avmpeg_demo seek: frame %ld: %.1f ms, %u of %u checked frames %s the full pass, first audio read %d\n",
+                       want, dt / 1000.0, bad ? bad : n, n, bad ? "differ from" : "match", ar);
             }
-            if (land != (unsigned long)-1 && land + k < total &&
-                memcmp(sums[land + k], c, sizeof(c))) {
-                if (!bad)
-                    first_bad = k;
-                bad++;
-            }
-            k++;
+            avmpeg_close(m);
         }
-        if (land != (unsigned long)-1)
-            printf("avmpeg_demo seek: %lu of %lu frames after the seek point differ from the "
-                   "full pass%s\n", bad, k, bad ? " (first at +" : "");
-        if (bad)
-            printf("avmpeg_demo seek: ...%lu)\n", first_bad);
-        print_stats(m, "avmpeg_demo seek", k, 0);
     }
-    avmpeg_close(m);
     printf("avmpeg_demo: done\n");
     return 0;
 }

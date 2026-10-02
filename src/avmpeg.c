@@ -27,6 +27,11 @@ struct avmpeg {
     int demux_eof;
     int video_flushed;
     unsigned long vindex;
+    struct { double time; uint32_t off; } *idx;   /* .pidx entries */
+    uint32_t idx_count;
+    long picture_count;
+    int64_t audio_drop_before_us;   /* seek: drop audio packets older than this clock */
+    int audio_dropping;
 };
 
 static void fifo_push(pkt_fifo_t *f, const AVPacket *pkt) {
@@ -78,6 +83,18 @@ static int demux_one(avmpeg_t *m, int64_t *vpts_us, int64_t *apts_us) {
                 *dst = av_rescale_q(pkt.pts, m->src.ic->streams[pkt.stream_index]->time_base,
                                     AV_TIME_BASE_Q);
         }
+        if (is_a && m->audio_dropping) {
+            int64_t at = pkt.pts != AV_NOPTS_VALUE ?
+                av_rescale_q(pkt.pts, m->src.ic->streams[pkt.stream_index]->time_base,
+                             AV_TIME_BASE_Q) : AV_NOPTS_VALUE;
+
+            if (at != AV_NOPTS_VALUE && at < m->audio_drop_before_us) {
+                av_free_packet(&pkt);
+                m->stats.demux_us += timer_us_gettime64() - t0;
+                return 1;
+            }
+            m->audio_dropping = 0;
+        }
         av_dup_packet(&pkt);
         fifo_push(is_a ? &m->afifo : &m->vfifo, &pkt);
         if (m->vfifo.count > m->stats.video_queue_max)
@@ -100,6 +117,7 @@ avmpeg_t *avmpeg_open(const char *path, const avmpeg_config_t *cfg) {
     if (!m)
         return NULL;
     m->src.vidx = m->src.aidx = -1;
+    m->picture_count = -1;
     ret = av_source_open(&m->src, path, cfg && cfg->idct_algo ? cfg->idct_algo : FF_IDCT_SIMPLE);
     if (ret != 0) {
         if (ret == AV_SOURCE_NO_FILE)
@@ -148,6 +166,7 @@ void avmpeg_close(avmpeg_t *m) {
         return;
     fifo_clear(&m->vfifo);
     fifo_clear(&m->afifo);
+    free(m->idx);
     av_free(m->pcm);
     av_free(m->frame);
     av_source_close(&m->src);
@@ -274,11 +293,78 @@ int avmpeg_pump(avmpeg_t *m) {
     return av_source_pump(&m->src);
 }
 
-int avmpeg_seek(avmpeg_t *m, double seconds) {
-    AVStream *vs = m->src.ic->streams[m->src.vidx];
-    int64_t ts = av_rescale_q((int64_t)(seconds * AV_TIME_BASE), AV_TIME_BASE_Q, vs->time_base);
+int avmpeg_load_index(avmpeg_t *m, const char *pidx_path) {
+    FILE *fp = fopen(pidx_path, "rb");
+    uint8_t raw[12];
+    uint32_t count, i;
 
-    if (av_seek_frame(m->src.ic, m->src.vidx, ts, AVSEEK_FLAG_BACKWARD) < 0)
+    if (!fp) {
+        printf("avmpeg: cannot open index %s\n", pidx_path);
+        return -1;
+    }
+    if (fread(&count, 4, 1, fp) != 1 || count == 0 || count > (1u << 24)) {
+        printf("avmpeg: bad index %s\n", pidx_path);
+        fclose(fp);
+        return -1;
+    }
+    free(m->idx);
+    m->idx = malloc((size_t)count * sizeof(*m->idx));
+    if (!m->idx) {
+        fclose(fp);
+        return -1;
+    }
+    for (i = 0; i < count; i++) {
+        /* explicit 12-byte entries: the in-memory struct is 16 bytes on SH-4 */
+        if (fread(raw, 1, 12, fp) != 12) {
+            printf("avmpeg: truncated index %s\n", pidx_path);
+            free(m->idx);
+            m->idx = NULL;
+            fclose(fp);
+            return -1;
+        }
+        memcpy(&m->idx[i].time, raw, 8);
+        memcpy(&m->idx[i].off, raw + 8, 4);
+    }
+    m->idx_count = count;
+    m->picture_count = -1;
+    if (fread(raw, 1, 8, fp) == 8 && !memcmp(raw, "PCNT", 4)) {
+        uint32_t pc;
+
+        memcpy(&pc, raw + 4, 4);
+        m->picture_count = (long)pc;
+    }
+    fclose(fp);
+    return 0;
+}
+
+long avmpeg_frame_count(const avmpeg_t *m) {
+    return m->picture_count;
+}
+
+int avmpeg_seek_frame(avmpeg_t *m, long frame) {
+    const double fps = (double)m->info.fps_num / m->info.fps_den;
+    double target, t0;
+    uint32_t lo = 0, hi, mid;
+    long land;
+    int64_t pos;
+    avmpeg_frame_t f;
+
+    if (!m->idx || frame < 0)
+        return -1;
+    t0 = m->idx[0].time;
+    target = t0 + (double)frame / fps;
+    /* last entry with time <= target (1 ms slack for an I-frame exactly on target) */
+    hi = m->idx_count;
+    while (lo + 1 < hi) {
+        mid = (lo + hi) / 2;
+        if (m->idx[mid].time <= target + 0.001)
+            lo = mid;
+        else
+            hi = mid;
+    }
+    land = (long)((m->idx[lo].time - t0) * fps + 0.5);
+    pos = (int64_t)m->idx[lo].off - 4;      /* back to the 00 00 01 E0 start code */
+    if (av_seek_frame(m->src.ic, -1, pos, AVSEEK_FLAG_BYTE) < 0)
         return -1;
     fifo_clear(&m->vfifo);
     fifo_clear(&m->afifo);
@@ -287,8 +373,21 @@ int avmpeg_seek(avmpeg_t *m, double seconds) {
     m->pcm_pos = m->pcm_len = 0;
     m->demux_eof = 0;
     m->video_flushed = 0;
-    m->vindex = 0;
+    m->vindex = (unsigned long)land;
+    /* audio from the target frame's media time on (PS clock, same base as the index) */
+    m->audio_drop_before_us = (int64_t)(target * AV_TIME_BASE);
+    m->audio_dropping = 1;
+    while (m->vindex < (unsigned long)frame) {
+        int r = avmpeg_video_next(m, &f);
+
+        if (r != AVMPEG_OK)
+            return -1;      /* AGAIN here means the audio queue filled: not expected */
+    }
     return 0;
+}
+
+int avmpeg_seek(avmpeg_t *m, double seconds) {
+    return avmpeg_seek_frame(m, (long)(seconds * m->info.fps_num / m->info.fps_den + 0.5));
 }
 
 const avmpeg_stats_t *avmpeg_stats(const avmpeg_t *m) {

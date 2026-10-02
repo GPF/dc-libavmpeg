@@ -77,10 +77,26 @@ int avmpeg_audio_read(avmpeg_t *m, int16_t *dst, int max_frames);
 /* Input top-up while idle (AV_STREAM=2 only; no-op otherwise). Returns 1 if it read. */
 int avmpeg_pump(avmpeg_t *m);
 
-/* Jump to the I-frame at or before `seconds` and restart both streams from there.
- * The next video frame is that I-frame (index 0); callers wanting an exact frame
- * decode forward and discard. Returns 0, or -1 if the input cannot seek (AV_STREAM=1
- * and 2 only seek within what they still hold). */
+/* Seek index: a `.pidx` file in the format of the pl_mpeg project's tools/build_pidx.py
+ * (uint32 count, then count * { double pts_seconds; uint32 byte_offset } packed, 12 bytes
+ * each, optional trailer 'PCNT' + uint32 picture count). byte_offset is the position just
+ * after the 00 00 01 E0 start code of the video PES packet holding the I-frame. FFmpeg
+ * 0.5's PS demuxer cannot seek by time on a freshly opened file (it has no timestamp
+ * search), so seeking requires the index. Returns 0, or -1 (reason printed). */
+int avmpeg_load_index(avmpeg_t *m, const char *pidx_path);
+
+/* Exact picture count from the index trailer, or -1 if unknown. */
+long avmpeg_frame_count(const avmpeg_t *m);
+
+/* Position so the next avmpeg_video_next() returns display-order frame `frame`
+ * (0 = first picture of the file): jumps to the nearest preceding indexed I-frame and
+ * decodes forward, discarding, to the target. Audio restarts at the target's media
+ * time (earlier audio packets are dropped). Needs avmpeg_load_index(); backward jumps
+ * need an input that can seek (AV_STREAM=0; the AV_STREAM=2 ring only reaches back
+ * over what it still holds). Returns 0, or -1. */
+int avmpeg_seek_frame(avmpeg_t *m, long frame);
+
+/* Same by time. */
 int avmpeg_seek(avmpeg_t *m, double seconds);
 
 const avmpeg_stats_t *avmpeg_stats(const avmpeg_t *m);
