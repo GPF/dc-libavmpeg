@@ -151,6 +151,17 @@ static uint8_t *load_file(const char *path, size_t *size_out) {
 }
 #endif
 
+#if !AV_STREAM
+static int64_t mem_seek(void *opaque, int64_t offset, int whence) {
+    av_source_t *s = opaque;
+
+    (void)offset;
+    if (whence & AVSEEK_SIZE)
+        return (int64_t)s->file_size;
+    return -1;
+}
+#endif
+
 int av_source_open(av_source_t *src, const char *path, int idct_algo) {
     static int registered;
     AVProbeData pd;
@@ -214,8 +225,11 @@ int av_source_open(av_source_t *src, const char *path, int idct_algo) {
     init_put_byte(&src->pb, src->iobuf, AV_STREAM_BUF, 0, src->fp, stream_read,
                   NULL, stream_seek);
 #else
-    init_put_byte(&src->pb, src->file_data, (int)src->file_size, 0, NULL, NULL,
-                  NULL, NULL);
+    /* The seek callback only answers AVSEEK_SIZE: the whole file is the buffer, so
+     * every seek lands inside it. Without it url_fsize() fails and a byte seek
+     * (av_seek_frame with AVSEEK_FLAG_BYTE) silently stays where it was. */
+    init_put_byte(&src->pb, src->file_data, (int)src->file_size, 0, src, NULL,
+                  NULL, mem_seek);
 #endif
     pd.filename = path;
     fmt = av_probe_input_format(&pd, 1);
