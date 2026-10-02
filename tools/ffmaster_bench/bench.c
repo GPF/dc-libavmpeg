@@ -1,6 +1,6 @@
 /* Decode benchmark for UNMODIFIED current FFmpeg (master) libraries, modern API.
  * Same clip, same measurement idea as dc-libavmpeg's av_main.c "video decode" and
- * audiobench: the whole MPEG-PS is preloaded, and only the avcodec_send_packet() /
+ * audiobench: the MPEG-PS is read from /pc/ through a custom AVIOContext, and only the avcodec_send_packet() /
  * avcodec_receive_frame() calls are timed. First 30 output frames are Adler-32
  * checksummed per plane with the same function as av_main.c's FRAME_TRACE, so the
  * output can be compared with the vendored FFmpeg 0.5 player's FRAME_CHECKSUM lines.
@@ -21,60 +21,28 @@
 #define CHECKSUM_FRAMES 30
 #define DEFAULT_FIXTURE "lair_320_23976_30s_spec.mpg"
 
-typedef struct { const uint8_t *data; size_t size, pos; } membuf_t;
+/* File-backed AVIO: the 16 MB DC heap cannot hold the clip plus the decoders. */
+typedef struct { FILE *f; int64_t size; } membuf_t;
 
 static int mem_read(void *opaque, uint8_t *buf, int size) {
     membuf_t *m = opaque;
-    size_t n = m->size - m->pos;
+    size_t n = fread(buf, 1, (size_t)size, m->f);
 
-    if (n == 0)
-        return AVERROR_EOF;
-    if (n > (size_t)size)
-        n = (size_t)size;
-    memcpy(buf, m->data + m->pos, n);
-    m->pos += n;
-    return (int)n;
+    return n ? (int)n : AVERROR_EOF;
 }
 
 static int64_t mem_seek(void *opaque, int64_t off, int whence) {
     membuf_t *m = opaque;
-    int64_t t;
 
     if (whence & AVSEEK_SIZE)
-        return (int64_t)m->size;
+        return m->size;
     switch (whence & ~AVSEEK_FORCE) {
-    case SEEK_SET: t = off; break;
-    case SEEK_CUR: t = (int64_t)m->pos + off; break;
-    case SEEK_END: t = (int64_t)m->size + off; break;
+    case SEEK_SET: case SEEK_CUR: case SEEK_END: break;
     default: return -1;
     }
-    if (t < 0 || t > (int64_t)m->size)
+    if (fseek(m->f, (long)off, whence & ~AVSEEK_FORCE) != 0)
         return -1;
-    m->pos = (size_t)t;
-    return t;
-}
-
-static uint8_t *load_file(const char *path, size_t *size_out) {
-    FILE *f = fopen(path, "rb");
-    long size;
-    uint8_t *data;
-
-    if (!f)
-        return NULL;
-    if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) <= 0 || fseek(f, 0, SEEK_SET) != 0) {
-        fclose(f);
-        return NULL;
-    }
-    data = av_malloc((size_t)size + AV_INPUT_BUFFER_PADDING_SIZE);
-    if (!data || fread(data, 1, (size_t)size, f) != (size_t)size) {
-        av_free(data);
-        fclose(f);
-        return NULL;
-    }
-    fclose(f);
-    memset(data + size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
-    *size_out = (size_t)size;
-    return data;
+    return ftell(m->f);
 }
 
 static void fixture_name(char *out, size_t n) {
@@ -108,8 +76,8 @@ static uint32_t adler_plane(const uint8_t *src, int stride, int w, int h) {
     return (b << 16) | a;
 }
 
-static int run_pass(const uint8_t *data, size_t size, int pass) {
-    membuf_t mb = { data, size, 0 };
+static int run_pass(const char *path, int pass) {
+    membuf_t mb = { fopen(path, "rb"), 0 };
     AVFormatContext *fmt = avformat_alloc_context();
     uint8_t *iobuf = av_malloc(32 * 1024);
     AVIOContext *io = avio_alloc_context(iobuf, 32 * 1024, 0, &mb, mem_read, NULL, mem_seek);
@@ -123,7 +91,12 @@ static int run_pass(const uint8_t *data, size_t size, int pass) {
     unsigned long long asamples = 0;
     static uint32_t sums[CHECKSUM_FRAMES][3];
 
-    if (!fmt || !io || !pkt || !frame) {
+    if (mb.f) {
+        fseek(mb.f, 0, SEEK_END);
+        mb.size = ftell(mb.f);
+        fseek(mb.f, 0, SEEK_SET);
+    }
+    if (!mb.f || !fmt || !io || !pkt || !frame) {
         printf("ffbench: out of memory\n");
         return -1;
     }
@@ -258,27 +231,21 @@ static int run_pass(const uint8_t *data, size_t size, int pass) {
     avformat_close_input(&fmt);
     av_freep(&io->buffer);
     avio_context_free(&io);
+    fclose(mb.f);
     return 0;
 }
 
 int main(void) {
     char fixture[200], path[256];
-    uint8_t *data;
-    size_t size = 0;
     int pass;
 
     printf("ffbench: unmodified FFmpeg (%s), %d passes\n", av_version_info(), PASSES);
     fixture_name(fixture, sizeof(fixture));
     snprintf(path, sizeof(path), "/pc/fixtures/%s", fixture);
-    data = load_file(path, &size);
-    if (!data) {
-        printf("ffbench: cannot load %s\n", path);
-        return 1;
-    }
-    printf("ffbench: loaded %s (%lu bytes)\n", path, (unsigned long)size);
+    printf("ffbench: streaming %s\n", path);
     av_log_set_level(AV_LOG_ERROR);
     for (pass = 1; pass <= PASSES; pass++)
-        if (run_pass(data, size, pass) != 0)
+        if (run_pass(path, pass) != 0)
             return 1;
     printf("ffbench: done\n");
     return 0;
