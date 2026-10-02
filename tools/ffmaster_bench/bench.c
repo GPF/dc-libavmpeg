@@ -1,0 +1,285 @@
+/* Decode benchmark for UNMODIFIED current FFmpeg (master) libraries, modern API.
+ * Same clip, same measurement idea as dc-libavmpeg's av_main.c "video decode" and
+ * audiobench: the whole MPEG-PS is preloaded, and only the avcodec_send_packet() /
+ * avcodec_receive_frame() calls are timed. First 30 output frames are Adler-32
+ * checksummed per plane with the same function as av_main.c's FRAME_TRACE, so the
+ * output can be compared with the vendored FFmpeg 0.5 player's FRAME_CHECKSUM lines.
+ *
+ * The clip is the `fixture=` line of /pc/config.ini under /pc/fixtures/ (run from
+ * the repo root with kos-tool -m .). Build: tools/ffmaster_bench/Makefile. */
+#include <kos.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/mem.h>
+
+#define PASSES 3
+#define CHECKSUM_FRAMES 30
+#define DEFAULT_FIXTURE "lair_320_23976_30s_spec.mpg"
+
+typedef struct { const uint8_t *data; size_t size, pos; } membuf_t;
+
+static int mem_read(void *opaque, uint8_t *buf, int size) {
+    membuf_t *m = opaque;
+    size_t n = m->size - m->pos;
+
+    if (n == 0)
+        return AVERROR_EOF;
+    if (n > (size_t)size)
+        n = (size_t)size;
+    memcpy(buf, m->data + m->pos, n);
+    m->pos += n;
+    return (int)n;
+}
+
+static int64_t mem_seek(void *opaque, int64_t off, int whence) {
+    membuf_t *m = opaque;
+    int64_t t;
+
+    if (whence & AVSEEK_SIZE)
+        return (int64_t)m->size;
+    switch (whence & ~AVSEEK_FORCE) {
+    case SEEK_SET: t = off; break;
+    case SEEK_CUR: t = (int64_t)m->pos + off; break;
+    case SEEK_END: t = (int64_t)m->size + off; break;
+    default: return -1;
+    }
+    if (t < 0 || t > (int64_t)m->size)
+        return -1;
+    m->pos = (size_t)t;
+    return t;
+}
+
+static uint8_t *load_file(const char *path, size_t *size_out) {
+    FILE *f = fopen(path, "rb");
+    long size;
+    uint8_t *data;
+
+    if (!f)
+        return NULL;
+    if (fseek(f, 0, SEEK_END) != 0 || (size = ftell(f)) <= 0 || fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    data = av_malloc((size_t)size + AV_INPUT_BUFFER_PADDING_SIZE);
+    if (!data || fread(data, 1, (size_t)size, f) != (size_t)size) {
+        av_free(data);
+        fclose(f);
+        return NULL;
+    }
+    fclose(f);
+    memset(data + size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
+    *size_out = (size_t)size;
+    return data;
+}
+
+static void fixture_name(char *out, size_t n) {
+    char line[256];
+    FILE *f = fopen("/pc/config.ini", "r");
+
+    snprintf(out, n, "%s", DEFAULT_FIXTURE);
+    if (!f)
+        return;
+    while (fgets(line, sizeof(line), f))
+        if (!strncmp(line, "fixture=", 8)) {
+            size_t len = strcspn(line + 8, "\r\n");
+
+            if (len > 0 && len < n) {
+                memcpy(out, line + 8, len);
+                out[len] = 0;
+            }
+        }
+    fclose(f);
+}
+
+static uint32_t adler_plane(const uint8_t *src, int stride, int w, int h) {
+    uint32_t a = 1, b = 0;
+    int x, y;
+
+    for (y = 0; y < h; y++, src += stride)
+        for (x = 0; x < w; x++) {
+            a = (a + src[x]) % 65521;
+            b = (b + a) % 65521;
+        }
+    return (b << 16) | a;
+}
+
+static int run_pass(const uint8_t *data, size_t size, int pass) {
+    membuf_t mb = { data, size, 0 };
+    AVFormatContext *fmt = avformat_alloc_context();
+    uint8_t *iobuf = av_malloc(32 * 1024);
+    AVIOContext *io = avio_alloc_context(iobuf, 32 * 1024, 0, &mb, mem_read, NULL, mem_seek);
+    AVCodecContext *vc = NULL, *ac = NULL;
+    AVPacket *pkt = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    int vidx = -1, aidx = -1, ret;
+    unsigned i;
+    uint64_t vdec_us = 0, vdec_max = 0, adec_us = 0, adec_max = 0;
+    unsigned long vframes = 0, aframes = 0, vpk = 0, apk = 0, aerr = 0;
+    unsigned long long asamples = 0;
+    static uint32_t sums[CHECKSUM_FRAMES][3];
+
+    if (!fmt || !io || !pkt || !frame) {
+        printf("ffbench: out of memory\n");
+        return -1;
+    }
+    fmt->pb = io;
+    fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+    if ((ret = avformat_open_input(&fmt, "mem.mpg", NULL, NULL)) < 0 ||
+        (ret = avformat_find_stream_info(fmt, NULL)) < 0) {
+        printf("ffbench: open/probe failed (%d)\n", ret);
+        return -1;
+    }
+    for (i = 0; i < fmt->nb_streams; i++) {
+        enum AVMediaType t = fmt->streams[i]->codecpar->codec_type;
+
+        if (t == AVMEDIA_TYPE_VIDEO && vidx < 0)
+            vidx = (int)i;
+        else if (t == AVMEDIA_TYPE_AUDIO && aidx < 0)
+            aidx = (int)i;
+    }
+    if (vidx < 0) {
+        printf("ffbench: no video stream\n");
+        return -1;
+    }
+    {
+        const AVCodec *c = avcodec_find_decoder(fmt->streams[vidx]->codecpar->codec_id);
+
+        vc = avcodec_alloc_context3(c);
+        avcodec_parameters_to_context(vc, fmt->streams[vidx]->codecpar);
+        vc->thread_count = 1;
+        if (!c || avcodec_open2(vc, c, NULL) < 0) {
+            printf("ffbench: video decoder open failed\n");
+            return -1;
+        }
+    }
+    if (aidx >= 0) {
+        const AVCodec *c = avcodec_find_decoder(fmt->streams[aidx]->codecpar->codec_id);
+
+        ac = avcodec_alloc_context3(c);
+        avcodec_parameters_to_context(ac, fmt->streams[aidx]->codecpar);
+        ac->thread_count = 1;
+        if (!c || avcodec_open2(ac, c, NULL) < 0) {
+            printf("ffbench: audio decoder open failed\n");
+            return -1;
+        }
+    }
+
+    for (;;) {
+        AVCodecContext *dc;
+        uint64_t t0, dt;
+        int got = 0;
+
+        ret = av_read_frame(fmt, pkt);
+        if (ret < 0)
+            break;
+        dc = pkt->stream_index == vidx ? vc : (pkt->stream_index == aidx ? ac : NULL);
+        if (!dc) {
+            av_packet_unref(pkt);
+            continue;
+        }
+        t0 = timer_us_gettime64();
+        if (avcodec_send_packet(dc, pkt) < 0) {
+            if (dc == ac) aerr++;
+            av_packet_unref(pkt);
+            continue;
+        }
+        while (avcodec_receive_frame(dc, frame) >= 0) {
+            got++;
+            if (dc == vc) {
+                if (vframes < CHECKSUM_FRAMES) {
+                    /* checksum time is excluded below by subtracting it */
+                    uint64_t c0 = timer_us_gettime64();
+
+                    sums[vframes][0] = adler_plane(frame->data[0], frame->linesize[0], vc->width, vc->height);
+                    sums[vframes][1] = adler_plane(frame->data[1], frame->linesize[1], vc->width / 2, vc->height / 2);
+                    sums[vframes][2] = adler_plane(frame->data[2], frame->linesize[2], vc->width / 2, vc->height / 2);
+                    t0 += timer_us_gettime64() - c0;
+                }
+                vframes++;
+            } else {
+                aframes++;
+                asamples += (unsigned long long)frame->nb_samples;
+            }
+            av_frame_unref(frame);
+        }
+        dt = timer_us_gettime64() - t0;
+        if (dc == vc) {
+            vdec_us += dt;
+            vpk++;
+            if (dt > vdec_max) vdec_max = dt;
+        } else {
+            adec_us += dt;
+            apk++;
+            if (dt > adec_max) adec_max = dt;
+        }
+        av_packet_unref(pkt);
+        (void)got;
+    }
+    /* flush the video decoder (delayed B/P frames) */
+    {
+        uint64_t t0 = timer_us_gettime64();
+
+        avcodec_send_packet(vc, NULL);
+        while (avcodec_receive_frame(vc, frame) >= 0) {
+            vframes++;
+            av_frame_unref(frame);
+        }
+        vdec_us += timer_us_gettime64() - t0;
+    }
+
+    printf("ffbench: pass %d: %s %dx%d, %lu video frames from %lu packets\n", pass,
+           vc->codec->name, vc->width, vc->height, vframes, vpk);
+    printf("ffbench:   video decode %.3f ms/frame  (slowest packet %.2f ms)  total %.1f ms\n",
+           vframes ? vdec_us / 1000.0 / vframes : 0.0, vdec_max / 1000.0, vdec_us / 1000.0);
+    if (ac) {
+        double secs = ac->sample_rate ? (double)asamples / ac->sample_rate : 0.0;
+
+        printf("ffbench:   audio %s %d Hz: %lu frames (%lu packets, %lu errors), %.2f s\n",
+               ac->codec->name, ac->sample_rate, aframes, apk, aerr, secs);
+        printf("ffbench:   audio decode %.3f ms/frame = %.1f ms per second of audio\n",
+               aframes ? adec_us / 1000.0 / aframes : 0.0, secs > 0 ? adec_us / 1000.0 / secs : 0.0);
+    }
+    if (pass == 1) {
+        unsigned k;
+
+        for (k = 0; k < CHECKSUM_FRAMES && k < vframes; k++)
+            printf("ffbench: FRAME_CHECKSUM idx=%u y=%08lx u=%08lx v=%08lx\n", k,
+                   (unsigned long)sums[k][0], (unsigned long)sums[k][1], (unsigned long)sums[k][2]);
+    }
+    avcodec_free_context(&vc);
+    avcodec_free_context(&ac);
+    av_frame_free(&frame);
+    av_packet_free(&pkt);
+    avformat_close_input(&fmt);
+    av_freep(&io->buffer);
+    avio_context_free(&io);
+    return 0;
+}
+
+int main(void) {
+    char fixture[200], path[256];
+    uint8_t *data;
+    size_t size = 0;
+    int pass;
+
+    printf("ffbench: unmodified FFmpeg (%s), %d passes\n", av_version_info(), PASSES);
+    fixture_name(fixture, sizeof(fixture));
+    snprintf(path, sizeof(path), "/pc/fixtures/%s", fixture);
+    data = load_file(path, &size);
+    if (!data) {
+        printf("ffbench: cannot load %s\n", path);
+        return 1;
+    }
+    printf("ffbench: loaded %s (%lu bytes)\n", path, (unsigned long)size);
+    av_log_set_level(AV_LOG_ERROR);
+    for (pass = 1; pass <= PASSES; pass++)
+        if (run_pass(data, size, pass) != 0)
+            return 1;
+    printf("ffbench: done\n");
+    return 0;
+}
