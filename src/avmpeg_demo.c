@@ -112,9 +112,6 @@ int main(void) {
             break;
         if (f.index < CHECKSUM_FRAMES)
             print_checksum("avmpeg_demo", &f);
-        if (f.index < 4 || (f.index >= 76 && f.index < 82))
-            printf("avmpeg_demo pass: frame %lu type %d from packet at byte %lld\n", f.index,
-                   f.pict_type, (long long)f.src_pos);
         vframes++;
         /* roughly one video frame's worth of audio per frame */
         {
@@ -220,8 +217,8 @@ int main(void) {
                                 last = j;
                                 cnt++;
                             }
-                        printf("  idx %lu type %d pkt@%lld y=%08lx: expected y=%08lx %s; matches full-pass frames: ",
-                               g.index, g.pict_type, (long long)g.src_pos, (unsigned long)c[0],
+                        printf("  idx %lu type %d y=%08lx: expected y=%08lx %s; matches full-pass frames: ",
+                               g.index, g.pict_type, (unsigned long)c[0],
                                g.index < total ? (unsigned long)sums[g.index][0] : 0UL,
                                g.index < total && !memcmp(sums[g.index], c, sizeof(c)) ? "OK" : "WRONG");
                         if (cnt)
