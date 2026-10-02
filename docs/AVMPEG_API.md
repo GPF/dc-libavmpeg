@@ -77,8 +77,13 @@ DCSinge (branch `mpeg-dcfmv`, `vendor/dc-libavmpeg` submodule) uses this library
   after startup (cold ring). With a closed GOP of 12 each seek decodes at most 11 frames forward.
 - Input mode `AV_STREAM=2` (2 MB ring); `avmpeg_set_io_lock()` shares DCSinge's file-I/O mutex.
 
+Cops (1920x1080 29.97 fps source, 44.1 kHz stereo Vorbis, 29:22) was encoded with
+`tools/encode_mpeg.sh cops.m2v cops.ogg cops.mpg --fps 30000/1001 --channels 2 --abit 96k` (188 MB
+`.mpg`, about 53,000 frames) and plays in DCSinge like its `.dcmv` version, so the stereo path through
+the interleaved callback works too.
+
 Not measured yet: per-frame decode, YUV422 conversion and MP2 cost under the game's load, and late
-frames or audio underruns. Open: Mad Dog (29.97 fps stereo) encode and test.
+frames or audio underruns. Open: Mad Dog encode and test.
 
 ### Encoding
 

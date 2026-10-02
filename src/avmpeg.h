@@ -108,6 +108,16 @@ int avmpeg_seek(avmpeg_t *m, double seconds);
  * into the library. */
 void avmpeg_set_io_lock(void (*lock)(void), void (*unlock)(void));
 
+/* Prebuffer-ring behaviour (AV_STREAM=2; zeros otherwise) since the last reset:
+ * idle top-ups, times the demuxer had to wait for the file, and the least data (bytes)
+ * the ring ever held ahead of the reader, (size_t)-1 if it was never read. */
+typedef struct {
+    unsigned long pumps, blocking_refills;
+    size_t min_ahead_bytes;
+} avmpeg_input_stats_t;
+void avmpeg_input_stats(const avmpeg_t *m, avmpeg_input_stats_t *out);
+void avmpeg_input_stats_reset(avmpeg_t *m);
+
 const avmpeg_stats_t *avmpeg_stats(const avmpeg_t *m);
 void avmpeg_reset_stats(avmpeg_t *m);
 
