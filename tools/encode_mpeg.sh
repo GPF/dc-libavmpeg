@@ -6,7 +6,9 @@
 #
 # Options (defaults suit Dragon's Lair: 4:3, 23.976 fps, mono):
 #   --size WxH       output size            (320x240)
-#   --fps N/D        output frame rate      (24000/1001)
+#   --fps N/D        frame rate of the source and output (24000/1001). Every source frame
+#                    is kept (nothing is dropped or duplicated): a raw .m2v carries no
+#                    timestamps, so this sets its real rate. Use 24 if audio ends early.
 #   --vbit RATE      video bitrate          (1500k)
 #   --gop N          frames per closed GOP  (12) -> seeks decode at most N-1 frames
 #   --rate HZ        audio sample rate      (22050)
@@ -19,7 +21,7 @@
 set -euo pipefail
 
 if [ $# -lt 3 ]; then
-    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n "2,21p" "$0" | sed 's/^# \{0,1\}//'
     exit 1
 fi
 VIDEO=$1; AUDIO=$2; OUT=$3; shift 3
@@ -49,10 +51,10 @@ echo "== source video"; ffprobe -v error -select_streams v:0 \
 echo "== source audio"; ffprobe -v error -select_streams a:0 \
     -show_entries stream=codec_name,sample_rate,channels,duration -of default=nw=1 "$AUDIO" || true
 
-ffmpeg -hide_banner -y -i "$VIDEO" -i "$AUDIO" -map 0:v:0 -map 1:a:0 \
-    -vf "scale=${W}:${H}:flags=lanczos,setsar=1,fps=${FPS}" \
-    -c:v mpeg1video -b:v "$VBIT" -maxrate "$VBIT" -bufsize 327680 \
-    -g "$GOP" -bf 2 -flags +cgop \
+ffmpeg -hide_banner -y -framerate "$FPS" -i "$VIDEO" -i "$AUDIO" -map 0:v:0 -map 1:a:0 \
+    -vf "scale=${W}:${H}:flags=lanczos,setsar=1" -r "$FPS" \
+    -c:v mpeg1video -b:v "$VBIT" \
+    -g "$GOP" -bf 2 -flags +cgop -sc_threshold 1000000000 \
     -c:a mp2 -ar "$RATE" -ac "$CH" -b:a "$ABIT" \
     -f mpeg "$OUT"
 
