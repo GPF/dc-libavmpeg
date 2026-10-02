@@ -102,6 +102,9 @@ static int run_pass(const char *path, int pass) {
     }
     fmt->pb = io;
     fmt->flags |= AVFMT_FLAG_CUSTOM_IO;
+    /* default probesize (5 MB) would buffer most of the clip in RAM */
+    fmt->probesize = 256 * 1024;
+    fmt->max_analyze_duration = 500000;
     if ((ret = avformat_open_input(&fmt, "mem.mpg", NULL, NULL)) < 0 ||
         (ret = avformat_find_stream_info(fmt, NULL)) < 0) {
         printf("ffbench: open/probe failed (%d)\n", ret);
