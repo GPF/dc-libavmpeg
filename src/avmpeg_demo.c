@@ -14,6 +14,7 @@
 #define CHECKSUM_FRAMES 30
 #define SEEK_TO_S 5.0
 #define SEEK_FRAMES 48
+#define MAX_FRAMES 1024
 
 static void fixture_name(char *out, size_t n) {
     char line[256];
@@ -125,26 +126,84 @@ int main(void) {
     asamples += drain_audio(m, pcm, 1152);
     print_stats(m, "avmpeg_demo pass", vframes, asamples);
 
-    /* seek and decode again */
-    avmpeg_reset_stats(m);
-    if (avmpeg_seek(m, SEEK_TO_S) != 0) {
-        printf("avmpeg_demo: seek to %.1f s failed (input cannot seek)\n", SEEK_TO_S);
-    } else {
-        vframes = asamples = 0;
-        while (vframes < SEEK_FRAMES) {
+    avmpeg_close(m);
+
+    /* Seek check. Pass 2 checksums every frame of a fresh decode from the start; pass 3
+     * seeks, decodes SEEK_FRAMES frames, finds which frame of pass 2 the first one is
+     * and compares the following ones. (Checksumming is kept out of the timing pass
+     * above because it pollutes the caches.) */
+    {
+        static uint32_t sums[MAX_FRAMES][3];
+        unsigned long total = 0, k, land = (unsigned long)-1, bad = 0, first_bad = 0;
+        avmpeg_frame_t g;
+
+        m = avmpeg_open(path, NULL);
+        if (!m) {
+            printf("avmpeg_demo: reopen failed\n");
+            return 1;
+        }
+        while (total < MAX_FRAMES) {
             r = avmpeg_video_next(m, &f);
             if (r == AVMPEG_AGAIN) {
-                asamples += drain_audio(m, pcm, 1152);
+                drain_audio(m, pcm, 1152);
                 continue;
             }
             if (r != AVMPEG_OK)
                 break;
-            if (vframes == 0)
-                print_checksum("avmpeg_demo seek", &f);
-            vframes++;
+            sums[total][0] = adler_plane(f.plane[0], f.stride[0], f.width, f.height);
+            sums[total][1] = adler_plane(f.plane[1], f.stride[1], f.width / 2, f.height / 2);
+            sums[total][2] = adler_plane(f.plane[2], f.stride[2], f.width / 2, f.height / 2);
+            total++;
         }
-        asamples += drain_audio(m, pcm, 1152);
-        print_stats(m, "avmpeg_demo seek", vframes, asamples);
+        avmpeg_close(m);
+
+        m = avmpeg_open(path, NULL);
+        if (!m || avmpeg_seek(m, SEEK_TO_S) != 0) {
+            printf("avmpeg_demo: seek to %.1f s failed (input cannot seek)\n", SEEK_TO_S);
+            avmpeg_close(m);
+            return 1;
+        }
+        for (k = 0; k < SEEK_FRAMES;) {
+            uint32_t c[3];
+
+            r = avmpeg_video_next(m, &g);
+            if (r == AVMPEG_AGAIN) {
+                drain_audio(m, pcm, 1152);
+                continue;
+            }
+            if (r != AVMPEG_OK)
+                break;
+            c[0] = adler_plane(g.plane[0], g.stride[0], g.width, g.height);
+            c[1] = adler_plane(g.plane[1], g.stride[1], g.width / 2, g.height / 2);
+            c[2] = adler_plane(g.plane[2], g.stride[2], g.width / 2, g.height / 2);
+            if (k == 0) {
+                unsigned long j;
+
+                for (j = 0; j < total; j++)
+                    if (!memcmp(sums[j], c, sizeof(c))) {
+                        land = j;
+                        break;
+                    }
+                printf("avmpeg_demo seek: to %.1f s, first frame type %d %s", SEEK_TO_S,
+                       g.pict_type, land == (unsigned long)-1 ? "matches NO frame of the full pass\n" : "");
+                if (land != (unsigned long)-1)
+                    printf("= frame %lu of the full pass (%.3f s)\n", land,
+                           (double)land * avmpeg_info(m)->frame_us / 1e6);
+            }
+            if (land != (unsigned long)-1 && land + k < total &&
+                memcmp(sums[land + k], c, sizeof(c))) {
+                if (!bad)
+                    first_bad = k;
+                bad++;
+            }
+            k++;
+        }
+        if (land != (unsigned long)-1)
+            printf("avmpeg_demo seek: %lu of %lu frames after the seek point differ from the "
+                   "full pass%s\n", bad, k, bad ? " (first at +" : "");
+        if (bad)
+            printf("avmpeg_demo seek: ...%lu)\n", first_bad);
+        print_stats(m, "avmpeg_demo seek", k, 0);
     }
     avmpeg_close(m);
     printf("avmpeg_demo: done\n");
