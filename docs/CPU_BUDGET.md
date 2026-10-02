@@ -83,6 +83,35 @@ the existing 320x240 `.dcmv`. A `.dcmv` VQ frame is 21,248 bytes at 320x240 (2 b
 per pixel plus a 2 KB codebook), about 4.1 Mbps before LZ4/zstd; the MPEG-1 clips are
 1.5 Mbps.
 
+## FFmpeg master evaluation -- measured
+
+Question: move from the vendored FFmpeg 0.5 to current master (8.0.git, commit
+98e9256)? Answer: **no, stay on 0.5.**
+
+`tools/ffmaster_bench` builds unmodified master (generic C, no asm; master has no SH-4
+code) and decodes `lair_320_23976_30s_spec.mpg` over `/pc/`, 3 passes, one thread.
+
+| | master (generic C) | 0.5 in this player | Difference |
+|---|---|---|---|
+| Video decode | 22.75-23.0 ms/frame | 20.0 (C IDCT), about 19.4 (MAC.W) | master 14-17% slower |
+| Slowest video packet | 48.5-49 ms | about 44 ms | master about 10% slower |
+| MP2, 44.1 kHz mono | 2.74 ms/frame | about 2.4 ms/frame | master about 14% slower |
+
+Master's video number includes the parser; the 0.5 figures are decode only. On Lair at
+22.05 kHz the difference is about 7 points of the 64% busy budget; Maddog's 97-99%
+seconds would not fit.
+
+Cost of the move, beyond speed: the player needs the `send_packet`/`receive_frame`
+API; PS payloads must go through the codec parsers (without them the decoder gets
+garbage); the default 5 MB probe buffers most of a clip in the 16 MB heap, so
+`probesize` must be capped; the SH-4 motion compensation and the MAC.W IDCT hook
+would need re-porting (`ff_cropTbl` -> `ff_crop_tab`, `hpeldsp`); GCC 17 needs
+`-Wno-error=incompatible-pointer-types -Wno-error=int-conversion`. MPEG-1/MP2 decode
+paths have barely changed upstream since about 2009, so there is little to gain.
+
+Not checked: bit-exactness against 0.5 (first master frame: `y=61c1c10f u=76ab822c
+v=76ab822c`), and the benchmark decodes 719 of 720 frames (parser tail not flushed).
+
 ## Reproducing
 
 ```
