@@ -20,6 +20,9 @@
 
 typedef struct avmpeg avmpeg_t;
 
+/* Set non-zero to print what avmpeg_seek_frame() does (landing entry, failures). */
+extern int avmpeg_verbose;
+
 enum {
     AVMPEG_OK = 1,          /* a frame / samples were produced (count for audio) */
     AVMPEG_EOF = 0,         /* nothing more will ever be produced */

@@ -8,6 +8,8 @@
 #include "av_source.h"
 #include "libavutil/mem.h"
 
+int avmpeg_verbose;
+
 #define PF_CAP 128          /* packets per stream queue */
 #define PCM_CHUNK_BYTES AVCODEC_MAX_AUDIO_FRAME_SIZE
 
@@ -364,8 +366,14 @@ int avmpeg_seek_frame(avmpeg_t *m, long frame) {
     }
     land = (long)((m->idx[lo].time - t0) * fps + 0.5);
     pos = (int64_t)m->idx[lo].off - 4;      /* back to the 00 00 01 E0 start code */
-    if (av_seek_frame(m->src.ic, -1, pos, AVSEEK_FLAG_BYTE) < 0)
+    if (avmpeg_verbose)
+        printf("avmpeg: seek frame %ld -> index entry %lu (pts %.3f s, byte %lld) = frame %ld\n",
+               frame, (unsigned long)lo, m->idx[lo].time, (long long)pos, land);
+    if (av_seek_frame(m->src.ic, -1, pos, AVSEEK_FLAG_BYTE) < 0) {
+        if (avmpeg_verbose)
+            printf("avmpeg: av_seek_frame(byte %lld) failed\n", (long long)pos);
         return -1;
+    }
     fifo_clear(&m->vfifo);
     fifo_clear(&m->afifo);
     avcodec_flush_buffers(m->src.vc);
@@ -380,8 +388,12 @@ int avmpeg_seek_frame(avmpeg_t *m, long frame) {
     while (m->vindex < (unsigned long)frame) {
         int r = avmpeg_video_next(m, &f);
 
-        if (r != AVMPEG_OK)
+        if (r != AVMPEG_OK) {
+            if (avmpeg_verbose)
+                printf("avmpeg: forward decode stopped at frame %lu of %ld: %d\n", m->vindex,
+                       frame, r);
             return -1;      /* AGAIN here means the audio queue filled: not expected */
+        }
     }
     return 0;
 }
