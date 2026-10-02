@@ -409,3 +409,8 @@ const avmpeg_stats_t *avmpeg_stats(const avmpeg_t *m) {
 void avmpeg_reset_stats(avmpeg_t *m) {
     memset(&m->stats, 0, sizeof(m->stats));
 }
+
+void avmpeg_set_io_lock(void (*lock)(void), void (*unlock)(void)) {
+    av_source_io_lock = lock;
+    av_source_io_unlock = unlock;
+}

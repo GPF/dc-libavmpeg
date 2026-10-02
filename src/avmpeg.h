@@ -102,6 +102,12 @@ int avmpeg_seek_frame(avmpeg_t *m, long frame);
 /* Same by time. */
 int avmpeg_seek(avmpeg_t *m, double seconds);
 
+/* Serialise the library's file reads (AV_STREAM=1/2) with the caller's other filesystem
+ * users, e.g. a mutex shared with the game's file loader. Set before avmpeg_open(). The
+ * hooks are called from whichever thread is inside an avmpeg call and must not call back
+ * into the library. */
+void avmpeg_set_io_lock(void (*lock)(void), void (*unlock)(void));
+
 const avmpeg_stats_t *avmpeg_stats(const avmpeg_t *m);
 void avmpeg_reset_stats(avmpeg_t *m);
 

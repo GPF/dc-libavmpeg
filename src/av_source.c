@@ -7,6 +7,13 @@
 #include "libavutil/mem.h"
 #include "ffmpeg_av.h"
 
+/* Optional hooks the embedding program sets so file reads can be serialised with its
+ * other filesystem users (avmpeg_set_io_lock). Only the streaming read/seek paths use them. */
+void (*av_source_io_lock)(void);
+void (*av_source_io_unlock)(void);
+#define IO_LOCK() do { if (av_source_io_lock) av_source_io_lock(); } while (0)
+#define IO_UNLOCK() do { if (av_source_io_unlock) av_source_io_unlock(); } while (0)
+
 #if AV_STREAM
 #ifndef AV_STREAM_BUF
 #define AV_STREAM_BUF (16 * 1024)
@@ -15,8 +22,11 @@
 #if AV_STREAM == 1
 static int stream_read(void *opaque, uint8_t *buf, int size) {
     FILE *fp = opaque;
-    size_t n = fread(buf, 1, (size_t)size, fp);
+    size_t n;
 
+    IO_LOCK();
+    n = fread(buf, 1, (size_t)size, fp);
+    IO_UNLOCK();
     if (n > 0)
         return (int)n;
     return ferror(fp) ? -1 : 0;
@@ -64,7 +74,9 @@ static size_t ring_fill(av_source_t *s, size_t want) {
         want = AV_RING_BYTES - pos;
     if (!want)
         return 0;
+    IO_LOCK();
     n = fread(s->ring + pos, 1, want, (FILE *)s->fp);
+    IO_UNLOCK();
     s->ring_end += n;
     if (s->ring_end - s->ring_start > AV_RING_BYTES)
         s->ring_start = s->ring_end - AV_RING_BYTES;
@@ -117,8 +129,12 @@ static int64_t ring_seek(void *opaque, int64_t offset, int whence) {
         s->ring_rd = (size_t)t;
         return t;
     }
-    if (fseek((FILE *)s->fp, (long)t, SEEK_SET) != 0)
+    IO_LOCK();
+    if (fseek((FILE *)s->fp, (long)t, SEEK_SET) != 0) {
+        IO_UNLOCK();
         return -1;
+    }
+    IO_UNLOCK();
     s->ring_start = s->ring_end = s->ring_rd = (size_t)t;
     return t;
 }
