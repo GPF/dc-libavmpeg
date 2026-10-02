@@ -25,6 +25,17 @@ divided by 1000 ms, averaged over whole seconds (not the first/last partial ones
 - Not pursued: swapping in pl_mpeg's MP2 decoder inside FFmpeg (about 3% CPU at
   44.1 kHz, and 22.05 kHz with FFmpeg's own decoder does better without a second
   decoder).
+- **Audio path in DCSinge: MP2 through KOS's interleaved stream callback.** ADPCM
+  (video-only MPEG-1 + the existing `.dca` audio) is not used for now; revisit it only
+  if CPU needs dictate (estimated saving: Lair mono about 6 points, Maddog stereo about
+  9). The `dcfmv` MPEG backend would use `snd_stream_set_callback` (interleaved PCM16;
+  KOS splits left/right) instead of `snd_stream_set_callback_direct`, so no L/R split
+  code is needed in the module. The callback should drain a PCM ring filled by the
+  audio decoder rather than decode inside the callback. Maddog becomes one stereo
+  stream instead of two mono streams; `dcfmv_audio_channel_enabled` would have to zero
+  samples in the ring (how DCSinge uses it is unchecked). KOS's de-interleave runs on
+  the CPU on every poll; its cost on this path has not been measured.
+- **FFmpeg stays at 0.5** (see "FFmpeg master evaluation" below).
 
 ## Measurements
 
