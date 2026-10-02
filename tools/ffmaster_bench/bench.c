@@ -114,6 +114,11 @@ static int run_pass(const char *path, int pass) {
     for (i = 0; i < fmt->nb_streams; i++) {
         enum AVMediaType t = fmt->streams[i]->codecpar->codec_type;
 
+        if (pass == 1)
+            printf("ffbench: stream %u type=%d codec_id=%d %dx%d\n", i, (int)t,
+                   (int)fmt->streams[i]->codecpar->codec_id,
+                   fmt->streams[i]->codecpar->width, fmt->streams[i]->codecpar->height);
+
         if (t == AVMEDIA_TYPE_VIDEO && vidx < 0)
             vidx = (int)i;
         else if (t == AVMEDIA_TYPE_AUDIO && aidx < 0)
@@ -123,6 +128,8 @@ static int run_pass(const char *path, int pass) {
         printf("ffbench: no video stream\n");
         return -1;
     }
+    if (fmt->streams[vidx]->codecpar->codec_id == AV_CODEC_ID_NONE)
+        fmt->streams[vidx]->codecpar->codec_id = AV_CODEC_ID_MPEG1VIDEO;
     {
         const AVCodec *c = avcodec_find_decoder(fmt->streams[vidx]->codecpar->codec_id);
 
