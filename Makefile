@@ -56,6 +56,8 @@ AV_TARGET = dc-libavmpeg-av.elf
 AV_OBJS = $(BUILD_DIR)/av_main.o src/av_source.o src/pvr_video.o src/ffmpeg_av.o src/cache_profile.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
 AUDIO_TARGET = dc-libavmpeg-audio.elf
 AUDIO_OBJS = src/audio_main.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
+AUDIOBENCH_TARGET = dc-libavmpeg-audiobench.elf
+AUDIOBENCH_OBJS = src/audio_bench.o src/ffmpeg_av.o $(BUILD_DIR)/idct_island.o $(BUILD_DIR)/idct_island_asm.o $(IDCT_ASM_OBJS) $(FFMPEG_OBJS) $(FFMPEG_AV_OBJS)
 DC_IP ?=
 MPEG_BENCHMARK ?= 1
 MPEG_EXTRA_CFLAGS ?=
@@ -112,6 +114,11 @@ $(PROBE_TARGET): $(PROBE_OBJS) $(ISLAND_LD)
 
 $(AUDIO_TARGET): $(AUDIO_OBJS) $(ISLAND_LD)
 	kos-cc $(ISLAND_LDFLAGS) -o $@ $(AUDIO_OBJS)
+
+$(AUDIOBENCH_TARGET): $(AUDIOBENCH_OBJS) $(ISLAND_LD)
+	kos-cc $(ISLAND_LDFLAGS) -o $@ $(AUDIOBENCH_OBJS)
+
+audiobench: $(AUDIOBENCH_TARGET)
 
 $(AV_TARGET): $(AV_OBJS) $(ISLAND_LD)
 	kos-cc $(ISLAND_LDFLAGS) -o $@ $(AV_OBJS)
@@ -181,7 +188,7 @@ cdi: $(TARGET) $(FIXTURE)
 	mkdcdisc -e $(TARGET) -n dc-libavmpeg -N -f $(FIXTURE) -o $(CDI_IMAGE)
 
 clean:
-	-rm -f $(TARGET) $(PROBE_TARGET) $(AUDIO_TARGET) $(AV_TARGET) src/*.o
+	-rm -f $(TARGET) $(PROBE_TARGET) $(AUDIO_TARGET) $(AV_TARGET) $(AUDIOBENCH_TARGET) src/*.o
 	-rm -rf $(BUILD_DIR)
 
 .PHONY: all clean run cdi probe run-probe audio run-audio av run-av
