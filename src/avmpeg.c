@@ -414,3 +414,15 @@ void avmpeg_set_io_lock(void (*lock)(void), void (*unlock)(void)) {
     av_source_io_lock = lock;
     av_source_io_unlock = unlock;
 }
+
+void avmpeg_input_stats(const avmpeg_t *m, avmpeg_input_stats_t *out) {
+    out->pumps = m->src.ring_pump_n;
+    out->blocking_refills = m->src.ring_block_n;
+    out->min_ahead_bytes = m->src.ring_min_ahead;
+}
+
+void avmpeg_input_stats_reset(avmpeg_t *m) {
+    m->src.ring_pump_n = 0;
+    m->src.ring_block_n = 0;
+    m->src.ring_min_ahead = (size_t)-1;
+}
