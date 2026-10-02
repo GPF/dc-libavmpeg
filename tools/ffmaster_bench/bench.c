@@ -162,6 +162,8 @@ static int run_pass(const char *path, int pass) {
         }
     }
 
+    printf("ffbench: pass %d decoding\n", pass);
+    fflush(stdout);
     for (;;) {
         AVCodecContext *dc;
         uint64_t t0, dt;
@@ -194,6 +196,10 @@ static int run_pass(const char *path, int pass) {
                     t0 += timer_us_gettime64() - c0;
                 }
                 vframes++;
+                if (vframes % 100 == 0) {
+                    printf("ffbench: pass %d: %lu video frames, %lu audio frames\n", pass, vframes, aframes);
+                    fflush(stdout);
+                }
             } else {
                 aframes++;
                 asamples += (unsigned long long)frame->nb_samples;
