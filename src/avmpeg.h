@@ -94,9 +94,9 @@ long avmpeg_frame_count(const avmpeg_t *m);
 /* Position so the next avmpeg_video_next() returns display-order frame `frame`
  * (0 = first picture of the file): jumps to the nearest preceding indexed I-frame and
  * decodes forward, discarding, to the target. Audio restarts at the target's media
- * time (earlier audio packets are dropped). Needs avmpeg_load_index(); backward jumps
- * need an input that can seek (AV_STREAM=0; the AV_STREAM=2 ring only reaches back
- * over what it still holds). Returns 0, or -1. */
+ * time (earlier audio packets are dropped). Needs avmpeg_load_index(). With AV_STREAM=2 a
+ * jump outside the prebuffer ring restarts the ring from the file (the first reads after
+ * it wait on the file). Returns 0, or -1. */
 int avmpeg_seek_frame(avmpeg_t *m, long frame);
 
 /* Same by time. */

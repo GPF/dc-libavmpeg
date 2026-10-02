@@ -54,5 +54,15 @@ moves this by about a millisecond between builds), MP2 about 2.1-2.3 ms/frame.
 ## Not done yet
 
 - `av_main.c` still has its own copy of the demux/decode logic; it is not ported onto the library.
-- `AV_STREAM=2` (ring) cannot seek backwards beyond what the ring still holds.
+- Seeking in `AV_STREAM=2` (ring) mode, which restarts the ring from the file for a jump outside it, has not been run on hardware yet (the verified seeks above used `AV_STREAM=0`).
 - Open-GOP streams (B-frames after an I-frame that refer to the previous GOP) were not tested.
+
+## Embedding in another project
+
+`libavmpeg.mk` builds `libavmpeg.a` out of tree with the KOS environment active:
+
+    make -f libavmpeg.mk OUT=/path/to/build AV_STREAM=2
+
+It fixes the MAC.W IDCT (no IDCT-island linker script needed) and defaults to the ring input.
+`ffmpeg_sources.mk` holds the FFmpeg source lists shared with the main Makefile. Link the archive
+last, with `-lm`.
