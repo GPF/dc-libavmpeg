@@ -54,8 +54,7 @@ moves this by about a millisecond between builds), MP2 about 2.1-2.3 ms/frame.
 ## Not done yet
 
 - `av_main.c` still has its own copy of the demux/decode logic; it is not ported onto the library.
-- Seeking in `AV_STREAM=2` (ring) mode, which restarts the ring from the file for a jump outside it, has not been run on hardware yet (the verified seeks above used `AV_STREAM=0`).
-- Open-GOP streams (B-frames after an I-frame that refer to the previous GOP) were not tested.
+- Open-GOP streams (B-frames after an I-frame that refer to the previous GOP) were not tested; `tools/encode_mpeg.sh` makes closed GOPs.
 
 ## Embedding in another project
 
@@ -66,3 +65,24 @@ moves this by about a millisecond between builds), MP2 about 2.1-2.3 ms/frame.
 It fixes the MAC.W IDCT (no IDCT-island linker script needed) and defaults to the ring input.
 `ffmpeg_sources.mk` holds the FFmpeg source lists shared with the main Makefile. Link the archive
 last, with `-lm`.
+
+## Status: used by DCSinge
+
+DCSinge (branch `mpeg-dcfmv`, `vendor/dc-libavmpeg` submodule) uses this library as a third
+`dcfmv` backend. Verified on real hardware (GD-EMU, CDI image) and in an emulator with the full
+33,759-frame Dragon's Lair (320x240, 22.05 kHz mono MP2, 268 MB `.mpg` plus `.pidx`):
+
+- Playback of the whole title with the Lua scripts, about 25 scene jumps in a session, no errors.
+- Scene jumps (`discSkipToFrame`) complete in about 0.3-0.6 s, plus about 1.5 s for the first one
+  after startup (cold ring). With a closed GOP of 12 each seek decodes at most 11 frames forward.
+- Input mode `AV_STREAM=2` (2 MB ring); `avmpeg_set_io_lock()` shares DCSinge's file-I/O mutex.
+
+Not measured yet: per-frame decode, YUV422 conversion and MP2 cost under the game's load, and late
+frames or audio underruns. Open: Mad Dog (29.97 fps stereo) encode and test.
+
+### Encoding
+
+`tools/encode_mpeg.sh VIDEO AUDIO OUT.mpg --expect FRAMES` encodes MPEG-1 video + MP2 audio and
+builds the `.pidx`. It keeps every source frame (the `.m2v` is a raw stream with no timestamps, so
+`--fps` states its real rate), uses closed GOPs of 12, and disables scene-cut I-frames (required
+by FFmpeg's closed-GOP encoder). Lair: 1440x1080 `.m2v` + Vorbis `.ogg` to 320x240, 22.05 kHz mono.
